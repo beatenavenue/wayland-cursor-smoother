@@ -147,14 +147,29 @@ Costs, which are real:
 - The code runs on every pointer motion event inside the compositor. **A crash
   takes down KWin and the user's session.**
 
-### KWin adds a deliberate corner barrier, on by default
+### Terminology trap — read this before proposing anything
+
+Several things in this problem space have near-identical names and opposite
+purposes. Confusing them has already cost this project time, both in the
+original ChatGPT sessions and once in a Claude session (see the correction note
+below). Keep them apart:
+
+| Name | What it is | Relation to this project |
+|---|---|---|
+| KWin **EdgeBarrier / CornerBarrier** | Deliberate resistance when the pointer crosses between screens | **Opposite of the goal.** Adds stickiness on purpose |
+| KWin **screen edges / ElectricBorders** | Hot corners and edge actions (trigger Overview, etc.) | Unrelated. Only appears here because CornerBarrier exists to serve it |
+| InputCapture portal **pointer barriers** | Trigger lines that start an input-capture session | A mechanism, unrelated to the two above. Rejected for other reasons |
+| Windows **Ease cursor movement between displays** | Active redirection: slides the pointer along an edge into the adjacent display | **This is the goal.** Nothing in KWin provides it |
+
+The distinction that matters: *removing resistance* is not *adding
+redirection*. Only the latter solves this.
+
+### KWin's corner barrier is real, but is NOT the cause of this problem
 
 `src/pointer_input.cpp`:
 
 ```cpp
-constexpr qreal cornerThreshold = 15;
-const bool onCorner = (pos - lastOutputGeometry.topLeft()).manhattanLength() <= cornerThreshold
-    || ... /* the other three corners */;
+constexpr qreal cornerThreshold = 15;   // Manhattan distance from an output corner
 ...
 } else if (options->cornerBarrier() && onCorner) {
     return EdgeBarrierType::CornerBarrier;
@@ -176,25 +191,30 @@ case EdgeBarrierType::NormalBarrier:
 </group>
 ```
 
-`applyEdgeBarrier()` accumulates movement into `m_movementInEdgeBarrier` and
-only lets the pointer through once the accumulated push exceeds the barrier
-width. At 2000px that is effectively never.
+**Correction, 2026-09-20.** An earlier version of this file claimed the three
+marked areas in `img/motivation.png` were output corners, and that disabling
+`CornerBarrier` might therefore resolve most of the problem. **That was wrong.**
+The marked areas are tall *vertical bands* along the centre output's left and
+right edges, covering the ranges that the neighbouring outputs do not span:
 
-**The three awkward spots in `img/motivation.png` are all output corners.** A
-large part of the reported problem may therefore be this feature rather than the
-display geometry, and may be fixable with nothing but:
+- centre's top edge down to the left monitor's top edge
+- the left monitor's bottom edge down to centre's bottom edge
+- the right monitor's bottom edge down to centre's bottom edge
 
-```ini
-[EdgeBarrier]
-CornerBarrier=false
-EdgeBarrier=0
-```
+Those bands are hundreds of pixels tall. `cornerThreshold` is 15px Manhattan and
+only applies at an output's four corners, so the barrier touches at most the
+extreme ends of each band. **The problem is geometry: the pointer has no
+destination at those heights.**
 
-The feature arrived in Plasma 6.1 and has drawn complaints upstream about its
-default. **This must be tested before any code is written.** It costs nothing
-and carries no risk. It cannot, however, create screen area that does not
-exist — where an output edge has no neighbour opposite it, the pointer still
-has nowhere to go.
+What the settings actually buy:
+
+- `EdgeBarrier=0` — removes the 100px resistance where a neighbouring output
+  *does* exist. A genuine annoyance fix, unrelated to the dead bands.
+- `CornerBarrier=false` — removes the 2000px barrier within 15px of an output
+  corner. Marginal here.
+
+Worth setting, free, zero risk, but **not a solution and not a prerequisite.**
+Do not present it as one.
 
 ### Absolute motion bypasses the edge barrier — possible Python write path
 
@@ -292,9 +312,9 @@ session. Decision 4 rules that out. Do not propose it again.
 - The display layout is mixed-DPI (3840x2160 alongside two 1920x1080). Coordinate
   space bugs between logical and physical pixels are a known hazard in this area
   across compositors; do not assume scale factors are uniform.
-- **Try the `kwinrc` barrier settings first.** They may resolve the problem
-  outright, and nothing else is worth doing until that is known.
-- If code is still needed, settle the uinput question next. Whether libinput
+- The `kwinrc` barrier settings are worth applying for comfort, but they do not
+  address the dead bands. Do not treat them as a gating step.
+- Settle the uinput question first. Whether libinput
   presents a virtual absolute-positioning device as a pointer or as a
   tablet/touchscreen decides whether a Python implementation is possible at all.
 - Keep anything that could crash out of the compositor process. This is a hard

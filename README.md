@@ -16,41 +16,39 @@ When building a multi-display setup, the usual best practice is to line up ident
 
 **wayland-cursor-smoother** aims to let the pointer glide smoothly across discontinuities at display corners, similar to Windows 11’s “Ease cursor movement between displays” option. Ideally this should be a baseline capability of Wayland itself; I hope this program becomes unnecessary sooner rather than later.
 
-## Check your KWin settings first
+## What this is *not*: KWin's edge and corner barriers
 
-Some of this pain may not be geometry at all. Since Plasma 6.1 KWin applies a
-deliberate *edge barrier* when the pointer crosses between screens, and a much
-stronger *corner barrier* near the corners of an output — within 15px
-(Manhattan) of a corner the resistance is **2000px**, which is effectively
-impassable.
+KWin has settings with confusingly adjacent names that do **not** solve this
+problem, and it is worth being explicit about them.
 
-From `src/pointer_input.cpp`:
+Since Plasma 6.1 KWin applies a deliberate *edge barrier* when the pointer
+crosses between screens (`EdgeBarrier`, default 100px of resistance) and a much
+stronger *corner barrier* within 15px of an output corner (`CornerBarrier`,
+default on, 2000px — effectively impassable). The corner barrier exists to make
+screen-edge and hot-corner actions reliably hittable on multi-monitor setups.
 
-```cpp
-} else if (options->cornerBarrier() && onCorner) {
-    return EdgeBarrierType::CornerBarrier;
-}
-...
-case EdgeBarrierType::CornerBarrier:
-    return 2000;
-```
-
-Both are configurable, and both are on by default (`CornerBarrier=true`,
-`EdgeBarrier=100`). In `~/.config/kwinrc`:
+**These are the opposite of what this project wants.** They add resistance on
+purpose. Turning them off:
 
 ```ini
+# ~/.config/kwinrc
 [EdgeBarrier]
 CornerBarrier=false
 EdgeBarrier=0
 ```
 
-or via System Settings → Mouse & Touchpad → Screen Edges.
+removes resistance where the pointer already has somewhere to go. It does not
+create screen area where there is none. The problem in the screenshot above is
+the vertical bands along an output edge that no neighbouring output covers —
+genuine geometry, not added stickiness.
 
-This cannot conjure up screen area that does not exist — where an output edge
-has no neighbouring output opposite it, the pointer still has nowhere to go.
-But it does remove resistance that KWin is adding on purpose, and the awkward
-spots in the screenshot above are all output *corners*. Try this before
-reaching for any of the approaches below.
+Worth doing anyway if the barriers annoy you, since it is free. It is not a
+substitute for this project.
+
+For contrast, Windows' *Ease cursor movement between displays* actively
+redirects: on hitting a dead band it slides the pointer along the edge and into
+the adjacent display. No KWin setting does that. That redirection is what this
+project is for.
 
 ## Approaches investigated and rejected
 
