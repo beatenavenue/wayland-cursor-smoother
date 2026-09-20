@@ -1036,3 +1036,39 @@ risk from the one weighed, not because the ruling is in doubt: `other::rw-`
 is **read and write**. Writing to an evdev node injects events, so any
 process on that system can send key events into the session through it.
 Reading was the risk considered; injection was not.
+
+### The rule is installed and the devices reach us
+
+`--watch` after installing the rule:
+
+```
+SILENT  event1        0 units in   0 batches   XING WEI ... Composite Device Mouse
+SILENT  event4        0 units in   0 batches   XP-PEN DECO 03 Mouse
+SILENT  event6        0 units in   0 batches   XP-PEN DECO 03
+moved   event8     3609 units in 878 batches   RP2040 HID Remapper MIPB Mouse
+moved   event14    1749 units in 634 batches   Lenovo TrackPoint Keyboard II
+```
+
+**Both pointers that were exercised deliver motion**, the TrackPoint among
+them. The three silent nodes are the tablet and an unused mouse; they were not
+moved. No keyboard is readable through anything this project installed.
+
+Batch sizes are worth noting for the detector: roughly 2.8 units per wakeup
+from the TrackPoint and 4.1 from the mouse. A push accumulator will be
+summing many small deltas, not a few large ones, so the threshold belongs in
+pixels of accumulated travel rather than in event counts.
+
+**Permissions are settled.** Nothing about reading the user's push is still
+open.
+
+### Remaining, and it is the last unverified piece
+
+The detector needs the pointer's global position as well as the push. That is
+the KWin script feed, and it is the one part with no hardware evidence behind
+it at all — including CLAUDE.md's own claim that it must be a declarative QML
+script rather than a plain JS one, which was read from source and never run.
+
+The failure mode recorded for it is silent: no error, the position simply
+never arrives. So it wants the same treatment the other two questions got —
+one run that tries both forms and reports which produced output, rather than
+picking one and debugging a silence.
