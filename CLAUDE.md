@@ -2,6 +2,21 @@
 
 Guidance for Claude Code (and humans) working in this repository.
 
+> [!IMPORTANT]
+> **This file is scratch. It is a working record of the trial and error leading
+> up to something that runs, and the author intends to delete it before any
+> public release.**
+>
+> It exists to stop later sessions re-walking dead ends, re-litigating settled
+> decisions, and repeating errors already made and corrected here. That is why
+> it keeps failed reasoning and corrections visible instead of tidying them
+> away — the mistakes are the point.
+>
+> It is **not** the project's documentation, and nothing here may be the only
+> copy of something worth keeping. Anything that should outlive the project's
+> completion belongs in `README.md` instead. `README.md` deliberately does not
+> reference this file, so that removing it breaks nothing.
+
 ## Project status
 
 **Nothing is implemented.** The repository contains documentation only: this
@@ -412,3 +427,14 @@ session. Decision 4 rules that out. Do not propose it again.
 - `README.md` is written in English. Keep it that way.
 - When recording a platform constraint here, cite the file it came from and note
   that it was read from `master`, so a later reader knows to re-verify.
+- **Before writing a finding here, ask whether it should survive this file's
+  deletion.** If it would still help someone after the project is finished or
+  abandoned, put it in `README.md` and leave only the working detail here. The
+  corner-barrier trap is the worked example: the explanation a stranger needs
+  lives in `README.md`, while the source excerpts and the record of how this
+  project got it wrong stay here.
+- Never add a `README.md` reference to this file. It has to remain deletable in
+  one step.
+- Corrections are appended and labelled, not applied silently. A later session
+  needs to see that a claim was once believed and why it failed, or it will
+  believe it again.
