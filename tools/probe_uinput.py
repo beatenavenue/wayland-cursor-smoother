@@ -215,47 +215,108 @@ def report_classification(pointer: VirtualPointer) -> bool:
 # --- 4. the feature, demonstrated ----------------------------------------
 
 
-def demonstrate(pointer: VirtualPointer, layout: Layout, interesting, dwell: float) -> None:
+class Console:
+    """Prompts that reach the screen even when stdout is redirected to a file.
+
+    The first run of this probe was piped to a log, and the landing test flew
+    past at a fixed interval -- fast enough that the pointer was visibly
+    moving but far too fast to check *where* it landed. Stepping is the fix,
+    and stepping is useless if "press Enter" ends up in the log file instead
+    of on the terminal. Hence /dev/tty.
+    """
+
+    def __init__(self, step: bool) -> None:
+        self.tty = None
+        if step:
+            try:
+                self.tty = open("/dev/tty", "r+")
+            except OSError:
+                print("(no /dev/tty; falling back to timed steps)")
+        self.step = self.tty is not None
+
+    def say(self, message: str) -> None:
+        print(message)
+        if self.tty:
+            self.tty.write(message + "\n")
+            self.tty.flush()
+
+    def pause(self, prompt: str, seconds: float) -> None:
+        if self.tty:
+            self.tty.write(f"    {prompt} [Enter] ")
+            self.tty.flush()
+            self.tty.readline()
+        else:
+            time.sleep(seconds)
+
+    def close(self) -> None:
+        if self.tty:
+            self.tty.close()
+
+
+def describe_point(layout: Layout, p: Point) -> str:
+    """Say where a point is in terms a person can check by looking."""
+    output = layout.output_at(p)
+    if output is None:
+        return f"({p.x:.0f},{p.y:.0f}) -- OUTSIDE every display, which is a bug"
+    r = output.rect
+    from_left, from_right = p.x - r.left, r.max_x - p.x
+    from_top, from_bottom = p.y - r.top, r.max_y - p.y
+    horizontal = (f"{from_left:.0f}px from its LEFT edge" if from_left <= from_right
+                  else f"{from_right:.0f}px from its RIGHT edge")
+    vertical = (f"{from_top:.0f}px from its TOP edge" if from_top <= from_bottom
+                else f"{from_bottom:.0f}px from its BOTTOM edge")
+    return (f"({p.x:.0f},{p.y:.0f}) = on {output.name} "
+            f"[{r.width}x{r.height}], {horizontal}, {vertical}")
+
+
+def demonstrate(pointer: VirtualPointer, layout: Layout, interesting, dwell: float,
+                console: Console) -> None:
     bb = layout.bounding_box
     mapping = AxisMapping(bb.x, bb.y, bb.width, bb.height)
 
     section("reach test: can absolute motion address every display?")
-    print("Watch the pointer. It should visit the centre of each display in turn.")
-    countdown(3)
+    console.say("The pointer should visit the centre of each display in turn.")
     for o in layout.outputs:
         cx = o.rect.x + o.rect.width // 2
         cy = o.rect.y + o.rect.height // 2
-        raw = pointer.move_to(mapping, cx, cy)
-        print(f"  -> centre of {o.name}: ({cx},{cy})  raw {raw}")
-        time.sleep(dwell)
+        console.pause(f"move to the centre of {o.name}?", 1.0)
+        pointer.move_to(mapping, cx, cy)
+        console.say(f"  -> {describe_point(layout, Point(cx, cy))}")
+        if not console.step:
+            time.sleep(dwell)
 
     if not interesting:
         return
 
     section("landing test: is this the behaviour the project wants?")
-    print("For each dead band the pointer is put at the band, then moved to where")
-    print("the redirect would land. Judge two things by eye:")
-    print("  * does it arrive at the NEAREST point along that edge (a slide)?")
-    print("  * does it ever arrive at the CENTRE of a display? That is a failure,")
-    print("    not a partial success.")
-    countdown(3)
-    for band, direction, source, r in interesting:
-        print(f"\n  {band.output} push {direction.value}, band "
-              f"{band.start}..{band.end - 1}")
+    console.say("Each band is shown in two steps: the pointer is parked at the dead")
+    console.say("edge, then moved to where the redirect would put it. Between the two")
+    console.say("it waits, so there is time to look. What matters:")
+    console.say("")
+    console.say("  * it should arrive at the NEAREST point along that edge, so the")
+    console.say("    move reads as a slide along the edge and across;")
+    console.say("  * it must NOT arrive at the centre of a display. That is a failure,")
+    console.say("    not a partial success.")
+
+    for index, (band, direction, source, r) in enumerate(interesting, 1):
+        console.say("")
+        console.say(f"  [{index}/{len(interesting)}] {band.output} push {direction.value}, "
+                    f"band {band.start}..{band.end - 1}")
+        console.pause("park the pointer at the dead edge?", 1.0)
         pointer.move_to(mapping, source.x, source.y)
-        print(f"    at the dead edge  ({source.x:.0f},{source.y:.0f})")
-        time.sleep(max(dwell, 1.0))
+        console.say(f"    now at: {describe_point(layout, source)}")
+        if not console.step:
+            time.sleep(max(dwell, 1.5))
+        console.pause("redirect it?", 1.0)
         pointer.move_to(mapping, r.target.x, r.target.y)
-        print(f"    redirected to     ({r.target.x:.0f},{r.target.y:.0f}) "
-              f"on {r.to_output}  [slide {r.slide:.0f}px]")
-        time.sleep(max(dwell, 1.0))
+        console.say(f"    landed: {describe_point(layout, r.target)}")
+        console.say(f"    slid {r.slide:.0f}px along the edge, jumped {r.gap:.0f}px across")
+        if not console.step:
+            time.sleep(max(dwell, 1.5))
 
-
-def countdown(seconds: int) -> None:
-    for remaining in range(seconds, 0, -1):
-        print(f"  starting in {remaining}...", end="\r", flush=True)
-        time.sleep(1)
-    print(" " * 30, end="\r")
+    console.say("")
+    console.say("If every 'landed' line above matched what you saw, the landing")
+    console.say("semantics are confirmed and only the detection half remains.")
 
 
 # --- main -----------------------------------------------------------------
@@ -271,8 +332,13 @@ def main() -> int:
     parser.add_argument("--bus", choices=("virtual", "usb"), default="virtual",
                         help="bustype to declare (default: virtual)")
     parser.add_argument("--name", default="wayland-cursor-smoother virtual pointer")
-    parser.add_argument("--dwell", type=float, default=1.2,
-                        help="seconds to pause at each position (default: 1.2)")
+    parser.add_argument("--no-step", action="store_true",
+                        help="do not wait for Enter between moves; use --dwell timing "
+                             "instead. Only worth it for an unattended run -- the "
+                             "landing position is hard to check at any fixed interval")
+    parser.add_argument("--dwell", type=float, default=2.0,
+                        help="with --no-step, seconds to pause at each position "
+                             "(default: 2.0)")
     parser.add_argument("--layout", metavar="SPEC",
                         help="override the detected layout, e.g. "
                              "'left:0,400,1920x1080;mid:1920,0,3840x2160'")
@@ -311,7 +377,11 @@ def main() -> int:
         pointer.settle()
         passed = report_classification(pointer)
         if passed and not args.no_move:
-            demonstrate(pointer, layout, interesting, args.dwell)
+            console = Console(step=not args.no_step)
+            try:
+                demonstrate(pointer, layout, interesting, args.dwell, console)
+            finally:
+                console.close()
         elif passed:
             print("\n--no-move: the pointer was not touched.")
     finally:

@@ -677,3 +677,46 @@ A log cannot say whether the pointer moved, or where it landed. Until the
 author reports what was on screen, "the warp works" and "the landing semantics
 are right" are both unconfirmed — the classification PASS above says only that
 the events were accepted onto the pointer path.
+
+### Reach test CONFIRMED; landing test still open
+
+The author's report of the first run: *the cursor was visibly moving and did
+appear on each display in turn, but it went too fast to tell whether it landed
+in the right place.*
+
+**That confirms the load-bearing claim empirically.** The pointer reached all
+three displays, so an absolute event from this device really is scaled against
+the whole workspace and really is not bound to one output. Up to this point
+that was an inference from reading `connection.cpp`; it is now an observation.
+
+The landing semantics remain unconfirmed, and that was a defect in the probe
+rather than in the idea: four bands at a fixed 1.2s interval is fast enough to
+see motion and far too fast to judge a position. Reworked:
+
+- the demonstration now steps, waiting for Enter between parking the pointer
+  at a dead edge and redirecting it;
+- prompts are written to `/dev/tty`, so they still appear on screen when the
+  run is piped to a log — which is how the first run was captured, and would
+  otherwise have hidden every prompt in the file;
+- each position is printed in terms that can be checked by looking:
+  `(1917,514) = on DP-3 [1920x1080], 2px from its RIGHT edge, 2px from its TOP
+  edge` rather than a bare coordinate pair.
+
+`--no-step` restores the old timed behaviour for an unattended run.
+
+### The landing point is constant within a band, and that is correct
+
+Watching the stepped demonstration, every landing for a given band is the same
+corner of the neighbouring display. That looks like the failure mode the Goal
+section warns about — "never a fixed landmark" — and it is not. Within a dead
+band, *every* position's nearest valid point is that corner, because the whole
+band lies beyond the neighbour's extent along that edge. There is nowhere else
+for it to be.
+
+What varies, and what the user feels, is the slide: entering the band close to
+the live edge slides a little, entering it far away slides a lot.
+`test_slide_is_monotonic_in_distance_from_the_live_edge` pins exactly that.
+
+The failure mode to keep watching for is a landing that ignores the entry
+position *across* bands, or one that sits in the middle of the target display.
+Neither is what a per-band corner is.
