@@ -1149,3 +1149,45 @@ Every component of that is now verified on hardware except the D-Bus service
 the script calls into, which does not exist yet. `callDBus` needs a name to
 call; Python needs to own one. What is available on the machine —
 `dbus-python`, `jeepney`, `pydbus` — has not been checked.
+
+## Link probe, 2026-09-21: every link is now confirmed on hardware
+
+`tools/probe_dbus_link.py`, 15 seconds, pointer moving:
+
+```
+PositionInts   42 call(s)   ['Int32', 'Int32', 'Int32']   (2674,1698,1) .. (3146,1343,42)
+PositionString 42 call(s)   ['String']                    '2674,1698,1' .. '3146,1343,42'
+call spacing   min 156ms  median 320ms  max 1009ms
+```
+
+**A KWin JS script can call into a Python-owned D-Bus name, and typed values
+survive.** A JS number arrives as `dbus.Int32`, so the feed can send
+coordinates as numbers; the preformatted-string fallback is not needed. Both
+forms delivered all 42 calls with none dropped.
+
+### The motion rate, measured
+
+42 reports at one per 30 motions is ~1260 `cursorPosChanged` signals in 15
+seconds: **about 84 per second** while the pointer is actually moving. The
+earlier guess of "thousands of D-Bus calls a second" was wrong by more than an
+order of magnitude.
+
+That does not change the design — the feed should still call out on a state
+change rather than on every sample, because a redirect needs one message, not
+a stream — but it is now a choice backed by a number rather than a fear. It
+also means a fallback that *does* stream is affordable if one is ever wanted.
+
+### Nothing in the path is unverified any more
+
+| Link | Confirmed by |
+|---|---|
+| Layout and dead bands match the desk | `probe_uinput.py --layout-only` |
+| Virtual absolute pointer reaches every display | reach test |
+| Landing semantics read as a slide | landing test |
+| Pointer motion can be animated smoothly | animated demonstration |
+| Physical device motion is readable, keyboards are not | `probe_evdev_access.py --watch` |
+| A JS script reads the global pointer position, live | `probe_kwin_feed.py` |
+| That script can call the daemon | `probe_dbus_link.py` |
+
+What is left is code, not questions: the push detector, and the daemon that
+joins the pieces.
