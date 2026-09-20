@@ -2,10 +2,12 @@
 KDE/Wayland Screen-Edge Cursor Smoother
 
 > [!WARNING]
-> **Status: WIP — research only. No implementation exists yet.**
+> **Status: WIP — nothing here has been confirmed on real hardware yet.**
 >
-> This repository contains no code. What follows is a problem statement and a
-> record of which approaches have been investigated and ruled out.
+> There is no working tool. What exists is a problem statement, a record of
+> which approaches have been ruled out, the geometry that decides where the
+> pointer should land, and a probe that answers whether the one remaining
+> approach is possible on a given machine.
 >
 > The findings are written to be useful on their own. If this project is never
 > finished, the section below on KWin's corner barrier should still save
@@ -84,6 +86,71 @@ display.
 
 Removing resistance is not the same as adding redirection. Nothing in KWin
 currently does the latter. That is what this project is for.
+
+## The approach being tried
+
+A virtual **absolute** pointer on `/dev/uinput`, driven from outside the
+compositor.
+
+Absolute pointer motion is the part that makes this possible. KWin scales an
+absolute pointer event against the geometry of the *whole* layout, so a single
+event can place the pointer anywhere on the desktop; it skips the edge barrier
+outright ("edge barriers are counter-productive for absolute motion"); and it
+is validated by its destination rather than by the path taken to get there.
+Unlike XTest, a uinput device is an ordinary evdev device as far as libinput
+and KWin are concerned, so nothing treats its events as untrusted. No portal
+is involved, so there is no permission dialog, no notification and no hidden
+cursor.
+
+The whole approach rests on one thing: **libinput has to classify the virtual
+device as a pointer.** Absolute axes alone are not enough — a device that also
+looks like a tablet or a touchscreen gets bound to a single display instead,
+and then it can never reach the display the pointer is supposed to move to.
+Declaring `ABS_X`/`ABS_Y` and a mouse button, and nothing else, is what puts
+it on the pointer path. This is the same shape as the absolute USB pointers
+that VMware and QEMU present to their guests.
+
+Note that this only concerns a *virtual* device. An ordinary graphics tablet
+is confined to one display because it is a tablet, not because Wayland's
+coordinates are per-display — a distinction that is easy to get backwards, and
+discouraging in the wrong direction if you do.
+
+### Checking your own layout
+
+This needs no special permissions, creates no device and moves nothing:
+
+```console
+$ python3 tools/probe_uinput.py --layout-only
+```
+
+It reads your layout with `kscreen-doctor` and lists every stretch of every
+display edge that has no display behind it, along with where the pointer
+*would* be sent. If that list does not match the places your pointer actually
+gets stuck, the problem is not the one described above.
+
+### Checking whether the approach can work at all
+
+```console
+$ python3 tools/probe_uinput.py
+```
+
+This additionally creates the virtual pointer, reports how udev and libinput
+classified it, and — if it passed — demonstrates the intended behaviour by
+placing the pointer in each dead band and moving it to the computed landing
+point. Watch what it does: arriving at the nearest point along the edge is the
+goal, arriving at the centre of a display is a failure.
+
+Writing to `/dev/uinput` requires membership of the group that owns it, which
+is `input` on most distributions.
+
+### Tests
+
+```console
+$ python3 -m unittest discover -s tests
+```
+
+Standard library only. These cover the layout maths and the landing
+semantics — the parts that can be decided without a display attached.
 
 ## Approaches investigated and rejected
 

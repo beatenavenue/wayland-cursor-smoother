@@ -438,3 +438,131 @@ session. Decision 4 rules that out. Do not propose it again.
 - Corrections are appended and labelled, not applied silently. A later session
   needs to see that a claim was once believed and why it failed, or it will
   believe it again.
+
+## Session record, 2026-09-20 (second session): implementation started
+
+The previous session ended with research only. This one wrote code. Read the
+split below before assuming anything here works: **no line of this has run on
+the author's hardware.** It was written in a headless container with no
+Wayland session, no KWin and no `/dev/uinput`, so the gating check that
+CLAUDE.md itself demands could not be performed here.
+
+### What is actually verified, and what is not
+
+| Part | Status |
+|---|---|
+| `src/wcs/geometry.py` — dead bands, landing semantics | **Verified.** Pure functions, 28 unit tests, no platform dependency |
+| `src/wcs/layout.py` — `kscreen-doctor -o` parsing | **Verified against a synthetic sample**, not against real output |
+| `src/wcs/uinput.py` — struct layouts, ioctl numbers, axis mapping | **Constants verified** by compiling against `/usr/include/linux/uinput.h`; the device has never been created |
+| Device classification, warping, landing behaviour | **Unverified.** Needs `tools/probe_uinput.py` on the real machine |
+
+Run `python3 -m unittest discover -s tests` for the first row. It needs no
+dependencies beyond the standard library.
+
+### The classification rule, stated precisely
+
+The previous session recorded the requirement ("`ABS_X`/`ABS_Y` plus
+`BTN_LEFT`, no `INPUT_PROP_DIRECT`, no `BTN_TOOL_PEN`") without the rule
+behind it. It comes from systemd's udev builtin,
+`src/udev/udev-builtin-input_id.c`, whose ordering is what matters:
+
+```c
+if (test_bit(EV_ABS, ...) && test_bit(ABS_X, ...) && test_bit(ABS_Y, ...)) {
+        if (test_bit(BTN_STYLUS, ...) || test_bit(BTN_TOOL_PEN, ...))
+                is_tablet = true;
+        else if (test_bit(BTN_TOOL_FINGER, ...) && !is_direct)
+                is_touchpad = true;
+        else if (test_bit(BTN_MOUSE, ...))
+                /* This path is taken by VMware's USB mouse, which has
+                 * absolute axes, but no touch/pressure button. */
+                is_mouse = true;
+        else if (test_bit(BTN_TOUCH, ...))
+                is_touchscreen = true;
+}
+```
+
+`BTN_MOUSE` and `BTN_LEFT` are the same code (`0x110`). The device this
+project needs is therefore the *fourth* branch, and it exists in the wild
+already: VMware's and QEMU's absolute USB pointers are exactly this shape and
+work under Wayland compositors. That is a real precedent rather than a
+hopeful reading, and it is the strongest evidence so far that the approach
+will hold. It is still not a test on the author's machine.
+
+Read from systemd `main` on 2026-09-20; re-verify against the installed
+systemd version if classification comes back wrong.
+
+### The axis mapping has an off-by-one worth knowing about
+
+libinput scales a raw absolute value by `to_range / absinfo_range`, where
+`absinfo_range()` is `maximum - minimum + 1`, not `maximum - minimum`. With
+axes declared `0..65535` the divisor is therefore 65536. Getting this wrong
+puts the far edge of the layout one pixel outside it — which lands in no
+output at all, on exactly the edge this project cares about. `AxisMapping` in
+`src/wcs/uinput.py` uses the +1 form and `tests/test_uinput.py` pins it.
+
+The normalised `0..65535` range was chosen over "declare the axis as the
+layout's pixel width" on purpose: KWin reads the scale target from the live
+workspace geometry on every event, so a normalised device survives a display
+being moved or added without being recreated.
+
+### New: the read side cannot be `cursorPos` alone
+
+This was not anticipated by the earlier research and it changes the design.
+
+The plan was: a KWin script watches `workspace.cursorPos`, notices the pointer
+is pinned at a dead edge, and asks the mover to redirect. **But a pinned
+pointer stops moving, so `cursorPosChanged` stops firing.** The script can see
+that the pointer *touched* a dead edge; it cannot see that the user is still
+pushing. Redirecting on touch alone would fling the pointer to another display
+every time the user reaches for something at the left of the centre screen —
+worse than the problem.
+
+KWin's own barrier does not have this problem because it sits inside the input
+pipeline and reads the raw delta directly (`eisinputcapturemanager.cpp`: "Both
+current and previous positions are on the barrier but there was an orthogonal
+delta").
+
+The way out, and it costs nothing extra: this project already needs
+`/dev/uinput` access, which in practice means membership of the `input` group,
+which also grants read access to `/dev/input/event*`. So the detector can read
+the physical mouse's own `REL_X`/`REL_Y` stream and accumulate outward push
+while the position feed says "pinned at a dead edge". That reproduces the
+barrier semantics faithfully, outside the compositor, with no new permission.
+
+**Not yet designed or written.** Recorded now so the next session does not
+rediscover it after building a position feed that cannot work.
+
+### What `tools/probe_uinput.py` settles, and why it is one command
+
+CLAUDE.md said to settle the uinput question in one step. The probe goes
+further than classification, because the same run can answer everything the
+author's machine is needed for:
+
+1. environment — Plasma version (which every finding here is sensitive to),
+   session type, `/dev/uinput` access;
+2. the live layout, and the dead bands computed from it — this alone is worth
+   running, needs no permissions at all (`--layout-only`), and falsifies the
+   geometry understanding immediately if the bands do not match
+   `img/motivation.png`;
+3. the gating classification check;
+4. a scripted demonstration of the feature: for each dead band it places the
+   pointer at the band and then warps it to the computed landing point.
+
+Step 4 is the point. It exercises the landing semantics end to end **without
+any detection logic existing yet**, so "does it slide to the nearest point or
+jump to a display centre" can be judged by eye before the harder half is
+built. If the semantics are wrong, they are wrong cheaply.
+
+### Open, in the order they should be answered
+
+1. Does the device classify as a pointer? (`tools/probe_uinput.py`) Nothing
+   else matters until this passes.
+2. Does the bounding box origin need subtracting? KWin scales against
+   `workspace()->geometry().size()`, and KScreen normally normalises layouts
+   to start at (0,0), so the question usually does not arise — but a layout
+   with a negative origin would expose it as a constant offset. The probe
+   prints a warning when the origin is not (0,0) so the symptom is
+   recognisable rather than mysterious.
+3. Detection: the `REL_X`/`REL_Y` accumulator described above, plus whatever
+   supplies the global position. A QML KWin script feed remains the candidate
+   for the position half; it is still unwritten.
