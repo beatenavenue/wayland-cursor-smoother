@@ -1072,3 +1072,80 @@ The failure mode recorded for it is silent: no error, the position simply
 never arrives. So it wants the same treatment the other two questions got —
 one run that tries both forms and reports which produced output, rather than
 picking one and debugging a silence.
+
+## Feed probe, 2026-09-21: the note about JS scripts was wrong, and backwards
+
+`tools/probe_kwin_feed.py` on Plasma 6.3.6. Both variants loaded and started;
+the compositor's journal:
+
+```
+qml: WCS-FEED-PROBE qml on load 2742,1431
+qml: WCS-FEED-PROBE qml callDBus unavailable: ReferenceError: callDBus is not defined
+qml: WCS-FEED-PROBE qml connected to cursorPosChanged
+js:  WCS-FEED-PROBE js on load 2742,1431
+js:  WCS-FEED-PROBE js connected to cursorPosChanged
+js:  WCS-FEED-PROBE js after 1 move(s) 2742,1431
+js:  WCS-FEED-PROBE js after 30 move(s) 2918,1515
+```
+
+### Correction, 2026-09-21: a plain JS KWin script reads the cursor fine
+
+The note recorded under "A KWin script cannot move the pointer" says:
+
+> `Workspace` is only available as a QML singleton on KWin 6+, so a KWin
+> script must be the QML/declarative kind, not a plain JS script. Getting this
+> wrong presents as "the cursor position cannot be read at all" with no error,
+> and is a plausible explanation for the original dead end.
+
+**That is wrong.** A plain JS script reads `workspace.cursorPos` on KWin 6.3.6
+and gets the same layout-global coordinates the QML singleton gives. Both
+variants reported `2742,1431` at the same instant.
+
+**And the recommendation it makes is the harmful direction.** A declarative
+script has no `callDBus` — the probe got `ReferenceError: callDBus is not
+defined` — so it can read the position and has no way to tell anything
+outside the compositor about it. Following that note would produce a script
+that works perfectly and delivers nothing, which is a far worse place to be
+stuck than a script that fails loudly.
+
+The JS variant's `callDBus` call did not throw: an exception there would have
+aborted the script before the `connected to cursorPosChanged` line, and that
+line is present, as are the two reports after it. So **JS can both read the
+position and call out**, and it is the only one of the two that can.
+
+### The feed is live, and `print()` reaches the journal unaided
+
+`cursorPosChanged` fires on pointer motion and the reported position tracks
+it: `2742,1431` at load, `2918,1515` thirty signals later. The feed half of
+the original two-component design works.
+
+`print()` from a script appears in `journalctl --user -u
+plasma-kwin_wayland.service` with a `js:` or `qml:` prefix without enabling
+any logging category. That was expected to be the unreliable channel and is
+not; it is available for the daemon's own diagnostics.
+
+### One small thing for the detector
+
+The first signal after load reported the *same* position as the load-time
+read (`2742,1431` twice). `cursorPosChanged` firing does not guarantee the
+position changed. A detector that assumes every signal carries new data will
+occasionally compute a zero delta and must not treat that as meaningful.
+
+### Architecture, now fully determined
+
+```
+KWin JS script  reads workspace.cursorPos, holds the layout, and calls out
+                only when the pointer enters or leaves a dead-band edge --
+                not on every motion, which would be thousands of D-Bus calls
+                a second
+        |  callDBus
+        v
+Python daemon   watches the physical devices for accumulated outward push
+                while the script says "pinned", decides when to fire, and
+                writes the redirect to /dev/uinput
+```
+
+Every component of that is now verified on hardware except the D-Bus service
+the script calls into, which does not exist yet. `callDBus` needs a name to
+call; Python needs to own one. What is available on the machine —
+`dbus-python`, `jeepney`, `pydbus` — has not been checked.

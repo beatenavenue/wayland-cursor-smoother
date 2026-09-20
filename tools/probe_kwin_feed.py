@@ -162,9 +162,14 @@ def main() -> int:
         print("notifications are the reliable signal here.")
     else:
         hits = [line for line in log.splitlines() if MARKER in line]
+        # Deliberately narrow. An earlier version matched "js:" and "qml:",
+        # which are the prefixes of every line the scripts print, so it
+        # reported all of them as complaints and buried the real signal.
         errors = [line for line in log.splitlines()
-                  if any(word in line.lower()
-                         for word in ("error", "warning", "js:", "qml:", "typeerror"))]
+                  if MARKER not in line
+                  and any(word in line.lower()
+                          for word in ("error", "warning", "exception",
+                                       "is not defined", "unable", "failed"))]
         if hits:
             print(f"{len(hits)} line(s) from the scripts:")
             for line in hits:
