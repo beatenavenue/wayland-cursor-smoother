@@ -42,6 +42,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wcs.geometry import Direction, Layout, Point, dead_bands, redirect_target
 from wcs.layout import LayoutError, detect_layout, parse_spec
+from wcs.motion import DEFAULT_RATE, approach_path, glide, redirect_path
 from wcs.uinput import BUS_USB, BUS_VIRTUAL, AxisMapping, UinputError, VirtualPointer
 
 TAGS = ("ID_INPUT", "ID_INPUT_MOUSE", "ID_INPUT_TOUCHPAD", "ID_INPUT_TOUCHSCREEN",
@@ -269,54 +270,83 @@ def describe_point(layout: Layout, p: Point) -> str:
             f"[{r.width}x{r.height}], {horizontal}, {vertical}")
 
 
-def demonstrate(pointer: VirtualPointer, layout: Layout, interesting, dwell: float,
-                console: Console) -> None:
+def demonstrate(pointer: VirtualPointer, layout: Layout, interesting, console: Console,
+                *, glide_seconds: float, rate: float, animate: bool, dwell: float) -> None:
     bb = layout.bounding_box
     mapping = AxisMapping(bb.x, bb.y, bb.width, bb.height)
 
+    def travel(points, seconds: float) -> None:
+        """Move along ``points``, as an animation or as a single warp."""
+        if animate and len(points) > 1:
+            glide(
+                lambda p: pointer.move_to(mapping, p.x, p.y),
+                points,
+                seconds,
+                rate=rate,
+                keep=layout.covers,
+            )
+        else:
+            destination = points[-1]
+            pointer.move_to(mapping, destination.x, destination.y)
+            if not console.step:
+                time.sleep(dwell)
+
     section("reach test: can absolute motion address every display?")
-    console.say("The pointer should visit the centre of each display in turn.")
+    console.say("The pointer travels to the centre of each display in turn. Follow it;")
+    console.say("it should cross the displays rather than reappear on them.")
+    here = None
     for o in layout.outputs:
-        cx = o.rect.x + o.rect.width // 2
-        cy = o.rect.y + o.rect.height // 2
-        console.pause(f"move to the centre of {o.name}?", 1.0)
-        pointer.move_to(mapping, cx, cy)
-        console.say(f"  -> {describe_point(layout, Point(cx, cy))}")
-        if not console.step:
-            time.sleep(dwell)
+        centre = Point(o.rect.x + o.rect.width // 2, o.rect.y + o.rect.height // 2)
+        console.pause(f"travel to the centre of {o.name}?", 1.0)
+        travel([here, centre] if here else [centre], glide_seconds * 0.8)
+        console.say(f"  -> {describe_point(layout, centre)}")
+        here = centre
 
     if not interesting:
         return
 
     section("landing test: is this the behaviour the project wants?")
-    console.say("Each band is shown in two steps: the pointer is parked at the dead")
-    console.say("edge, then moved to where the redirect would put it. Between the two")
-    console.say("it waits, so there is time to look. What matters:")
+    console.say("Each band is shown as two movements, both animated:")
     console.say("")
-    console.say("  * it should arrive at the NEAREST point along that edge, so the")
-    console.say("    move reads as a slide along the edge and across;")
-    console.say("  * it must NOT arrive at the centre of a display. That is a failure,")
-    console.say("    not a partial success.")
+    console.say("  1. a run-up to the dead edge, which is where the pointer gets stuck")
+    console.say("     today -- watch it stop there;")
+    console.say("  2. the redirect: it slides ALONG that edge to the first height the")
+    console.say("     neighbouring display reaches, then crosses onto it.")
+    console.say("")
+    console.say("The slide is the whole point. A jump straight to the neighbour, or a")
+    console.say("landing anywhere near the middle of it, is a failure.")
 
     for index, (band, direction, source, r) in enumerate(interesting, 1):
+        rect = next(o.rect for o in layout.outputs if o.name == band.output)
         console.say("")
         console.say(f"  [{index}/{len(interesting)}] {band.output} push {direction.value}, "
                     f"band {band.start}..{band.end - 1}")
-        console.pause("park the pointer at the dead edge?", 1.0)
-        pointer.move_to(mapping, source.x, source.y)
-        console.say(f"    now at: {describe_point(layout, source)}")
+
+        console.pause("run up to the dead edge?", 1.0)
+        travel(approach_path(rect, source, direction), glide_seconds * 0.6)
+        console.say(f"    stuck at: {describe_point(layout, source)}")
         if not console.step:
-            time.sleep(max(dwell, 1.5))
+            time.sleep(max(dwell, 1.0))
+
         console.pause("redirect it?", 1.0)
-        pointer.move_to(mapping, r.target.x, r.target.y)
-        console.say(f"    landed: {describe_point(layout, r.target)}")
-        console.say(f"    slid {r.slide:.0f}px along the edge, jumped {r.gap:.0f}px across")
-        if not console.step:
-            time.sleep(max(dwell, 1.5))
+        # Split the slide from the crossing instead of pacing the whole path
+        # by distance. The crossing is only a few pixels wide, so an even
+        # pace spends 94% of the animation on the slide and flicks through
+        # the one moment worth watching -- the pointer leaving one display
+        # and arriving on the next.
+        legs = redirect_path(source, r.target, direction)
+        if len(legs) == 3:
+            travel(legs[:2], glide_seconds * 0.7)
+            travel(legs[1:], glide_seconds * 0.3)
+        else:
+            travel(legs, glide_seconds)
+        console.say(f"    landed:   {describe_point(layout, r.target)}")
+        console.say(f"    slid {r.slide:.0f}px along the edge, crossed {r.gap:.0f}px")
 
     console.say("")
-    console.say("If every 'landed' line above matched what you saw, the landing")
-    console.say("semantics are confirmed and only the detection half remains.")
+    console.say("If each redirect read as a slide along the edge and onto the next")
+    console.say("display, the landing semantics are confirmed and only detection")
+    console.say("remains.")
 
 
 # --- main -----------------------------------------------------------------
@@ -337,8 +367,16 @@ def main() -> int:
                              "instead. Only worth it for an unattended run -- the "
                              "landing position is hard to check at any fixed interval")
     parser.add_argument("--dwell", type=float, default=2.0,
-                        help="with --no-step, seconds to pause at each position "
-                             "(default: 2.0)")
+                        help="with --no-step and --no-animate, seconds to pause at "
+                             "each position (default: 2.0)")
+    parser.add_argument("--glide", type=float, default=3.0, metavar="SECONDS",
+                        help="how long a redirect takes to draw (default: 3.0). The "
+                             "real thing is instant; this is slowed down to be "
+                             "followed by eye")
+    parser.add_argument("--rate", type=float, default=DEFAULT_RATE, metavar="HZ",
+                        help=f"absolute positions per second (default: {DEFAULT_RATE:g})")
+    parser.add_argument("--no-animate", action="store_true",
+                        help="warp instead of animating, as the real thing will")
     parser.add_argument("--layout", metavar="SPEC",
                         help="override the detected layout, e.g. "
                              "'left:0,400,1920x1080;mid:1920,0,3840x2160'")
@@ -379,7 +417,9 @@ def main() -> int:
         if passed and not args.no_move:
             console = Console(step=not args.no_step)
             try:
-                demonstrate(pointer, layout, interesting, args.dwell, console)
+                demonstrate(pointer, layout, interesting, console,
+                            glide_seconds=args.glide, rate=args.rate,
+                            animate=not args.no_animate, dwell=args.dwell)
             finally:
                 console.close()
         elif passed:

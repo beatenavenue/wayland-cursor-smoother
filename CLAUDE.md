@@ -720,3 +720,50 @@ the live edge slides a little, entering it far away slides a lot.
 The failure mode to keep watching for is a landing that ignores the entry
 position *across* bands, or one that sits in the middle of the target display.
 Neither is what a per-band corner is.
+
+### The demonstration animates, because a warp cannot be verified by eye
+
+The stepped, self-describing version above was still the wrong answer. The
+author's objection, and it is correct: *reading "2px from its RIGHT edge" and
+then hunting for the pointer across three large displays is not something human
+perception is good at.* Describing a position is no substitute for watching the
+pointer arrive at it.
+
+So the demonstration now emits a stream of absolute positions — 120 per second
+by default, the order of magnitude a physical mouse reports at — and the
+pointer travels. `src/wcs/motion.py`, tested by `tests/test_motion.py`.
+
+Three things fell out of building it that are worth keeping:
+
+**The path is the semantic, drawn.** A redirect means "slide along this edge to
+the nearest point the neighbour reaches, then cross". Interpolating straight
+from the pointer to the landing point instead cuts the corner through dead
+space — and a position in dead space is not inert: `updatePosition()` resolves
+it against the *nearest* output and clamps, so the pointer would scrabble
+rather than travel. Sliding first and crossing second keeps every waypoint on
+a real display. Verified against the author's layout: 2881 positions emitted
+across the whole demonstration, none of them outside every display.
+
+**Pacing by distance hides the one moment worth watching.** The slide is
+258px; the crossing is 3px. Spaced evenly by arc length, the crossing gets 6%
+of the animation. The redirect is therefore animated as two legs — 70% of the
+time on the slide, 30% on the crossing — so leaving one display and arriving
+on the next takes about a second instead of flicking past.
+
+**The timing loop must use absolute deadlines.** Each frame writes three
+evdev events; accumulating `sleep(interval)` would stretch a three-second
+animation by however long that takes. `glide()` sleeps until a deadline
+computed from the start, and takes its clock and its sleep as arguments so the
+schedule is unit tested rather than assumed.
+
+### Open: should the real redirect animate too?
+
+Not asked and not decided, but the animation code now exists and the question
+is cheap. A production redirect could be an instantaneous warp — what Windows
+does — or a very short glide, perhaps 60–100ms, which would preserve
+continuity even more strongly for the same reason the demonstration needed it:
+the eye can follow a moving pointer and cannot follow a teleporting one. The
+slide distances here run to a few hundred pixels, which is far enough to lose.
+
+Worth trying both once detection exists. Do not assume the warp is correct
+just because it is what the platform does natively.

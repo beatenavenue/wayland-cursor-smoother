@@ -135,10 +135,20 @@ $ python3 tools/probe_uinput.py
 ```
 
 This additionally creates the virtual pointer, reports how udev and libinput
-classified it, and — if it passed — demonstrates the intended behaviour by
-placing the pointer in each dead band and moving it to the computed landing
-point. Watch what it does: arriving at the nearest point along the edge is the
-goal, arriving at the centre of a display is a failure.
+classified it, and — if it passed — demonstrates the intended behaviour.
+
+The demonstration is animated and stepped, which matters more than it sounds
+like it should. It runs the pointer up to a dead edge so you can watch it stop
+there, waits, and then draws the redirect: a slide along the edge to the first
+point the neighbouring display reaches, followed by the crossing onto it. A
+warp is instantaneous, and on a large multi-display desk an instantaneous
+change of position cannot be checked by looking — the pointer is simply
+somewhere else. Watching it travel, you can tell at a glance whether the
+motion reads as a slide, and whether it lands anywhere near the middle of a
+display, which would be a failure rather than a partial success.
+
+`--glide SECONDS` sets the pace, `--no-animate` warps instead, and `--no-step`
+runs it unattended.
 
 Writing to `/dev/uinput` requires membership of the group that owns it, which
 is `input` on most distributions.
