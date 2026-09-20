@@ -1224,3 +1224,68 @@ detector exists to avoid. A `max_slide` of 0 would mean "never redirect",
 which nobody writes on purpose — "off" has its own spellings (`none`, `off`,
 `unlimited`, blank). A `duration` of 0 *is* allowed, because it is simply a
 warp, and refusing it would be pedantry.
+
+## The daemon's first failure, 2026-09-21: a discarded return value
+
+The daemon started cleanly, created the device, loaded the feed, watched five
+devices, and did **nothing**. No arming, no redirect, no error, anywhere.
+
+### How it was found, and what the two wrong guesses cost
+
+Bisecting a silence needs the silence cut in half, and it took two cuts.
+
+*First cut* (`--diagnose`): the script loaded, ran, and logged its startup
+line; no `Edge` call arrived. So the script was alive and the break was later.
+On the way, a guess was made and was **wrong**: the daemon had declared
+`in_signature="iii"` where the probe that proved the path declared none, and a
+rejected signature does look exactly like silence. Changing it back to match
+the probe was right on principle — never deviate from the configuration that
+was actually tested — but it was not the bug, and the symptom did not move.
+
+*Second cut* (tracing in the feed script): the script printed what it saw.
+
+```
+js: wcs-feed sees 1920,2054 -> band 1
+```
+
+The rectangle test was correct, the position was correct, `callDBus` was
+reached, and the try/catch added at the same time never fired. Call made, no
+exception, nothing received.
+
+### The bug
+
+```python
+dbus.service.BusName(BUS_NAME, bus, do_not_queue=True)      # daemon: wrong
+name = dbus.service.BusName(BUS_NAME, bus, do_not_queue=True)  # probe: right
+```
+
+`BusName` releases the bus name in `__del__`. Discarding the result acquires
+the name and gives it straight back when the temporary is collected.
+
+Every symptom follows. Acquisition succeeds, so the daemon logs that it owns
+the name. The name is released a moment later. `callDBus` reaches a name
+nobody owns; the bus answers with an error; **KWin discards that error because
+the call is fire-and-forget**, so no JS exception is raised and nothing is
+logged. A daemon that starts perfectly and is deaf.
+
+The link probe worked only because it happened to be written `name = ...`.
+One character of difference, invisible at every layer.
+
+### Guarded, because no runtime check can see it
+
+`tests/test_source_guards.py` parses every source file and fails on a
+discarded call to anything in a list of results that must be kept. It is a
+test that reads source rather than behaviour, which is justified here and
+rarely elsewhere: the failure has no runtime signal at all. Reintroducing the
+bug fails the suite with the file, the line and the reason.
+
+### Two diagnostics that earned their place
+
+The feed script's `trace` mode prints the position it read and the band it
+computed, which is what separated "the geometry disagrees" from "the call
+fails". Reading the code could not.
+
+The `try`/`catch` around `callDBus` was added in the same change. Until it
+existed, a call that threw and a call that was never reached looked the same.
+It did not fire this time, and that silence was itself the evidence that
+narrowed the search.

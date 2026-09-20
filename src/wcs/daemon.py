@@ -89,6 +89,8 @@ class Daemon:
         self._caller = find_dbus_caller()
         self._redirects = 0
         self._edges = 0
+        self._bus_name = None  # must outlive the loop; see run()
+        self._feed_object = None
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -109,7 +111,13 @@ class Daemon:
         DBusGMainLoop(set_as_default=True)
         bus = dbus.SessionBus()
         try:
-            dbus.service.BusName(BUS_NAME, bus, do_not_queue=True)
+            # The reference must be kept. dbus.service.BusName releases the
+            # name in __del__, so a bare call acquires it and hands it back
+            # the moment the temporary is collected -- after which callDBus
+            # reaches a name nobody owns, the bus answers with an error, and
+            # KWin discards that error because the call is fire-and-forget.
+            # The result is total silence, which is how this was found.
+            self._bus_name = dbus.service.BusName(BUS_NAME, bus, do_not_queue=True)
         except dbus.exceptions.NameExistsException:
             log(f"{BUS_NAME} is already owned; is another copy running?")
             return 2
@@ -131,7 +139,7 @@ class Daemon:
             def Reload(self):
                 return daemon.reload()
 
-        Feed(bus, OBJECT_PATH)
+        self._feed_object = Feed(bus, OBJECT_PATH)
         log(f"owning {BUS_NAME}")
 
         self.pointer = VirtualPointer(name=DEVICE_NAME).open()

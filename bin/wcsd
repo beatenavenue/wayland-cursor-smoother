@@ -166,7 +166,9 @@ def diagnose(config, seconds: float) -> int:
     DBusGMainLoop(set_as_default=True)
     bus = dbus.SessionBus()
     try:
-        dbus.service.BusName(BUS_NAME, bus, do_not_queue=True)
+        # Kept in a variable on purpose: BusName releases the name from
+        # __del__, so dropping the reference hands it straight back.
+        bus_name = dbus.service.BusName(BUS_NAME, bus, do_not_queue=True)
     except dbus.exceptions.NameExistsException:
         print(f"2. d-bus name       : ALREADY OWNED -- is wcsd already running?")
         return 2
@@ -179,7 +181,7 @@ def diagnose(config, seconds: float) -> int:
         def Edge(self, index, x, y):
             calls.append((int(index), int(x), int(y)))
 
-    Feed(bus, OBJECT_PATH)
+    feed_object = Feed(bus, OBJECT_PATH)
 
     caller = find_dbus_caller()
     if caller is None:
@@ -227,6 +229,7 @@ def diagnose(config, seconds: float) -> int:
     except DBusError:
         pass
 
+    assert bus_name is not None and feed_object is not None  # keep them alive
     print(f"\n6. Edge calls       : {len(calls)}")
     for call in calls[:10]:
         print(f"     band={call[0]} at ({call[1]},{call[2]})")
