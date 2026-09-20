@@ -1,0 +1,140 @@
+"""Tests for the watch strips and the generated feed script.
+
+The strips are how the dead-band semantic reaches the compositor *without*
+being reimplemented there. So these check two things: that the strips are the
+dead bands, and that the script knows nothing else.
+"""
+
+import json
+import sys
+import unittest
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from wcs.feed import (  # noqa: E402
+    WatchBand,
+    bands_as_json,
+    feed_script,
+    watch_bands,
+)
+from wcs.geometry import Direction, Layout, Output, Rect  # noqa: E402
+from wcs.layout import parse_kscreen_doctor  # noqa: E402
+
+FIXTURE = Path(__file__).parent / "data" / "kscreen-doctor-plasma-6.3.6.txt"
+REAL = parse_kscreen_doctor(FIXTURE.read_text())
+
+
+class WatchBandTest(unittest.TestCase):
+    def test_the_real_layout_yields_exactly_its_four_dead_bands(self):
+        bands = watch_bands(REAL)
+        self.assertEqual(
+            [(b.output, b.direction.value, b.rect) for b in bands],
+            [
+                ("DP-4", "left", Rect(1920, 0, 2, 512)),
+                ("DP-4", "left", Rect(1920, 1592, 2, 568)),
+                ("DP-4", "right", Rect(5758, 0, 2, 92)),
+                ("DP-4", "right", Rect(5758, 2012, 2, 148)),
+            ],
+        )
+
+    def test_perimeter_bands_are_left_out(self):
+        # The outside edges of the desktop are dead bands too, and arming
+        # there would teach the user that pushing sometimes does nothing.
+        outputs = {b.output for b in watch_bands(REAL)}
+        self.assertEqual(outputs, {"DP-4"})
+
+    def test_indices_are_contiguous_and_match_position(self):
+        bands = watch_bands(REAL)
+        self.assertEqual([b.index for b in bands], list(range(len(bands))))
+
+    def test_a_strip_hugs_the_edge_it_watches(self):
+        for band in watch_bands(REAL, strip=2):
+            rect = next(o.rect for o in REAL.outputs if o.name == band.output)
+            if band.direction is Direction.LEFT:
+                self.assertEqual(band.rect.left, rect.left)
+            else:
+                self.assertEqual(band.rect.right, rect.right)
+            self.assertEqual(band.rect.width, 2)
+
+    def test_vertical_strips_hug_the_top_and_bottom(self):
+        stacked = Layout.of([
+            Output("top", Rect(0, 0, 500, 500)),
+            Output("bottom", Rect(200, 500, 1000, 500)),
+        ])
+        by_direction = {b.direction: b for b in watch_bands(stacked, strip=3)}
+        down = by_direction[Direction.DOWN]
+        self.assertEqual(down.output, "top")
+        self.assertEqual(down.rect, Rect(0, 497, 200, 3))
+        up = by_direction[Direction.UP]
+        self.assertEqual(up.output, "bottom")
+        self.assertEqual(up.rect, Rect(500, 500, 700, 3))
+
+    def test_a_strip_is_never_thinner_than_one_pixel(self):
+        self.assertTrue(all(b.rect.width >= 1 and b.rect.height >= 1
+                            for b in watch_bands(REAL, strip=0)))
+
+    def test_max_slide_removes_the_bands_it_would_refuse(self):
+        # Every band on this layout needs a slide of at least 48px.
+        self.assertEqual(watch_bands(REAL, max_slide=10), [])
+        self.assertEqual(len(watch_bands(REAL, max_slide=1000)), 4)
+
+    def test_a_rectangular_layout_has_nothing_to_watch(self):
+        tidy = Layout.of([
+            Output("a", Rect(0, 0, 1920, 1080)),
+            Output("b", Rect(1920, 0, 1920, 1080)),
+        ])
+        self.assertEqual(watch_bands(tidy), [])
+
+
+class JsonTest(unittest.TestCase):
+    def test_the_table_carries_only_what_the_script_needs(self):
+        band = WatchBand(3, Rect(10, 20, 2, 30), "DP-9", Direction.LEFT)
+        self.assertEqual(
+            json.loads(bands_as_json([band])),
+            [{"i": 3, "x": 10, "y": 20, "w": 2, "h": 30}],
+        )
+
+    def test_the_output_name_and_direction_stay_in_python(self):
+        # The script gets rectangles, not meanings.
+        text = bands_as_json(watch_bands(REAL))
+        self.assertNotIn("DP-4", text)
+        self.assertNotIn("left", text)
+
+
+class ScriptTest(unittest.TestCase):
+    BANDS = watch_bands(REAL)
+    SCRIPT = feed_script(BANDS, bus_name="a.b.C", object_path="/a/b/C",
+                         interface="a.b.C.Feed")
+
+    def test_it_is_syntactically_plausible(self):
+        self.assertEqual(self.SCRIPT.count("{"), self.SCRIPT.count("}"))
+        self.assertEqual(self.SCRIPT.count("("), self.SCRIPT.count(")"))
+
+    def test_it_carries_the_strips_and_the_address(self):
+        self.assertIn(bands_as_json(self.BANDS), self.SCRIPT)
+        for piece in ('"a.b.C"', '"/a/b/C"', '"a.b.C.Feed"'):
+            self.assertIn(piece, self.SCRIPT)
+
+    def test_it_reports_through_one_method(self):
+        self.assertEqual(self.SCRIPT.count("callDBus"), 1)
+        self.assertIn("'Edge'", self.SCRIPT)
+
+    def test_it_stays_silent_away_from_every_strip(self):
+        # The early return is what keeps this from being 84 calls a second.
+        self.assertIn("if (band < 0 && current < 0)", self.SCRIPT)
+
+    def test_it_contains_no_layout_knowledge(self):
+        # If any of these appear, the semantic has started to leak into JS.
+        for word in ("DP-4", "dead", "neighbour", "redirect", "slide"):
+            self.assertNotIn(word, self.SCRIPT.replace("dead band", ""))
+
+    def test_an_empty_band_list_still_produces_a_valid_script(self):
+        script = feed_script([], bus_name="a.b.C", object_path="/a/b/C",
+                             interface="a.b.C.Feed")
+        self.assertIn("var BANDS = [];", script)
+        self.assertEqual(script.count("{"), script.count("}"))
+
+
+if __name__ == "__main__":
+    unittest.main()
