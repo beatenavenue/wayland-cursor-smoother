@@ -42,7 +42,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wcs.geometry import Direction, Layout, Point, dead_bands, redirect_target
 from wcs.layout import LayoutError, detect_layout, parse_spec
-from wcs.motion import DEFAULT_RATE, approach_path, glide, redirect_path
+from wcs.motion import (DEFAULT_RATE, approach_path, glide, max_legible_duration,
+                        redirect_path)
 from wcs.uinput import BUS_USB, BUS_VIRTUAL, AxisMapping, UinputError, VirtualPointer
 
 TAGS = ("ID_INPUT", "ID_INPUT_MOUSE", "ID_INPUT_TOUCHPAD", "ID_INPUT_TOUCHSCREEN",
@@ -228,29 +229,40 @@ class Console:
 
     def __init__(self, step: bool) -> None:
         self.tty = None
+        self.owns_tty = False
         if step:
             try:
                 self.tty = open("/dev/tty", "r+")
+                self.owns_tty = True
             except OSError:
-                print("(no /dev/tty; falling back to timed steps)")
+                # No controlling terminal. stdin still works if it is one,
+                # which covers being launched from a shell that detached the
+                # tty but left stdin attached.
+                if sys.stdin.isatty():
+                    self.tty = sys.stdin
+                else:
+                    print("(no terminal to prompt on; falling back to timed steps)")
         self.step = self.tty is not None
 
     def say(self, message: str) -> None:
         print(message)
-        if self.tty:
+        if self.owns_tty:
             self.tty.write(message + "\n")
             self.tty.flush()
 
     def pause(self, prompt: str, seconds: float) -> None:
-        if self.tty:
+        if not self.tty:
+            time.sleep(seconds)
+            return
+        if self.owns_tty:
             self.tty.write(f"    {prompt} [Enter] ")
             self.tty.flush()
-            self.tty.readline()
         else:
-            time.sleep(seconds)
+            print(f"    {prompt} [Enter] ", end="", flush=True)
+        self.tty.readline()
 
     def close(self) -> None:
-        if self.tty:
+        if self.owns_tty:
             self.tty.close()
 
 
@@ -329,17 +341,19 @@ def demonstrate(pointer: VirtualPointer, layout: Layout, interesting, console: C
             time.sleep(max(dwell, 1.0))
 
         console.pause("redirect it?", 1.0)
-        # Split the slide from the crossing instead of pacing the whole path
-        # by distance. The crossing is only a few pixels wide, so an even
-        # pace spends 94% of the animation on the slide and flicks through
-        # the one moment worth watching -- the pointer leaving one display
-        # and arriving on the next.
+        # The slide and the crossing are paced separately, but NOT evenly:
+        # the crossing is only a few pixels wide and cannot fill time. Give
+        # it a third of the animation and it shows four positions over most
+        # of a second, which looks like the pointer snagging. So the slide
+        # gets the time, a still hold marks the corner, and the crossing is
+        # drawn as fast as it needs to stay continuous.
         legs = redirect_path(source, r.target, direction)
         if len(legs) == 3:
-            travel(legs[:2], glide_seconds * 0.7)
-            travel(legs[1:], glide_seconds * 0.3)
+            travel(legs[:2], glide_seconds * 0.85)
+            time.sleep(0.4)  # a beat at the corner: deliberate, not stuck
+            travel(legs[1:], min(glide_seconds * 0.3, max_legible_duration(r.gap)))
         else:
-            travel(legs, glide_seconds)
+            travel(legs, min(glide_seconds, max_legible_duration(r.gap + r.slide)))
         console.say(f"    landed:   {describe_point(layout, r.target)}")
         console.say(f"    slid {r.slide:.0f}px along the edge, crossed {r.gap:.0f}px")
 

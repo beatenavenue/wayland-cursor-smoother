@@ -37,6 +37,27 @@ def smoothstep(t: float) -> float:
     return t * t * (3.0 - 2.0 * t)
 
 
+#: Below roughly this many visible pixel steps per second, motion stops
+#: reading as motion and starts reading as a fault. Measured the hard way:
+#: a 3px move drawn over 0.9s shows four positions, one every 300ms, and an
+#: observer reports the pointer "snagging" -- which is exactly what it does.
+MIN_STEP_RATE = 20.0
+
+
+def max_legible_duration(distance_px: float, *,
+                         min_step_rate: float = MIN_STEP_RATE,
+                         floor: float = 0.08) -> float:
+    """The longest a move of this length can take and still look continuous.
+
+    A screen can only show whole pixels, so a move of N pixels has at most N
+    visible steps to spend however long it is given.  Stretching a short move
+    does not make it smoother; it makes it stutter.  Long moves are not
+    capped by this in practice -- 258px allows nearly 13 seconds -- so it only
+    ever binds on the short ones, which is where the mistake was.
+    """
+    return max(floor, distance_px / min_step_rate)
+
+
 def redirect_path(source: Point, target: Point, direction: Direction) -> list[Point]:
     """Waypoints from the dead edge to the landing point.
 

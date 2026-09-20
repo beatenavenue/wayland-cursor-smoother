@@ -13,8 +13,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wcs.geometry import Direction, Layout, Output, Point, Rect  # noqa: E402
 from wcs.motion import (  # noqa: E402
+    MIN_STEP_RATE,
     approach_path,
     glide,
+    max_legible_duration,
     redirect_path,
     sample_path,
     smoothstep,
@@ -200,3 +202,25 @@ class GlideTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class LegibleDurationTest(unittest.TestCase):
+    """A screen shows whole pixels, so a short move cannot fill a long time."""
+
+    def test_a_three_pixel_crossing_gets_a_fraction_of_a_second(self):
+        self.assertAlmostEqual(max_legible_duration(3), 3 / MIN_STEP_RATE)
+        self.assertLess(max_legible_duration(3), 0.2)
+
+    def test_a_long_slide_is_not_meaningfully_capped(self):
+        # 258px could be drawn over nearly 13 seconds before it stuttered, so
+        # this never binds on the leg that actually wants the time.
+        self.assertGreater(max_legible_duration(258), 10.0)
+
+    def test_a_zero_length_move_still_gets_the_floor(self):
+        self.assertEqual(max_legible_duration(0), 0.08)
+        self.assertEqual(max_legible_duration(0.5), 0.08)
+
+    def test_the_cap_is_what_keeps_the_step_rate_up(self):
+        for distance in (3, 10, 60, 250):
+            duration = max_legible_duration(distance)
+            self.assertGreaterEqual(distance / duration, MIN_STEP_RATE - 1e-9)
