@@ -91,16 +91,48 @@ def config_path() -> Path:
     return Path(base) / CONFIG_BASENAME
 
 
+def _validate(section: str, key: str, value):
+    """Apply one field's range rule. Shared so that a value refused in the
+    config file cannot be smuggled past on the command line -- which it could,
+    until `--threshold 0` was found to be accepted while `threshold = 0` was
+    not. Zero means "fire on contact", the behaviour the detector exists to
+    prevent, so accepting it anywhere is a bug."""
+    kind, check, complaint = _FIELDS[section][key]
+    if kind == "style":
+        if value not in STYLES:
+            raise ConfigError(
+                f"[{section}] {key}: {value!r} is not one of {', '.join(STYLES)}"
+            )
+        return value
+    if kind == "optional_float" and value is None:
+        return None
+
+    # Coerce as well as check, so a value means the same thing whichever way
+    # it arrived. Without this a flag stores an int where the file stores a
+    # float, and two configs that should be equal are not.
+    try:
+        if kind == "int":
+            coerced = int(value)
+            if coerced != float(value):
+                raise ConfigError(
+                    f"[{section}] {key}: {value} must be a whole number"
+                )
+        else:
+            coerced = float(value)
+    except (TypeError, ValueError):
+        raise ConfigError(f"[{section}] {key}: {value!r} is not a number") from None
+
+    if check is not None and not check(coerced):
+        raise ConfigError(f"[{section}] {key}: {coerced} {complaint}")
+    return coerced
+
+
 def _convert(section: str, key: str, raw: str):
     kind, check, complaint = _FIELDS[section][key]
     text = raw.strip()
 
     if kind == "style":
-        if text not in STYLES:
-            raise ConfigError(
-                f"[{section}] {key}: {text!r} is not one of {', '.join(STYLES)}"
-            )
-        return text
+        return _validate(section, key, text)
 
     if kind == "optional_float" and text in ("", "none", "off", "unlimited"):
         return None
@@ -110,9 +142,7 @@ def _convert(section: str, key: str, raw: str):
     except ValueError:
         raise ConfigError(f"[{section}] {key}: {text!r} is not a number") from None
 
-    if check is not None and not check(value):
-        raise ConfigError(f"[{section}] {key}: {value} {complaint}")
-    return value
+    return _validate(section, key, value)
 
 
 def parse_config(text: str) -> Config:
@@ -157,13 +187,13 @@ def load_config(path: Optional[Path] = None) -> Config:
 
 def with_overrides(config: Config, **overrides) -> Config:
     """Apply command line overrides; ``None`` means "not given"."""
-    detect = {k: v for k, v in overrides.items()
-              if v is not None and k in _FIELDS["detect"]}
-    redirect = {k: v for k, v in overrides.items()
-                if v is not None and k in _FIELDS["redirect"]}
     unknown = set(overrides) - set(_FIELDS["detect"]) - set(_FIELDS["redirect"])
     if unknown:
         raise ConfigError(f"not settings: {', '.join(sorted(unknown))}")
+    detect = {k: _validate("detect", k, v) for k, v in overrides.items()
+              if v is not None and k in _FIELDS["detect"]}
+    redirect = {k: _validate("redirect", k, v) for k, v in overrides.items()
+                if v is not None and k in _FIELDS["redirect"]}
     return Config(
         detect=replace(config.detect, **detect) if detect else config.detect,
         redirect=replace(config.redirect, **redirect) if redirect else config.redirect,

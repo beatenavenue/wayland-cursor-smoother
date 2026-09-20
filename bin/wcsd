@@ -1,0 +1,161 @@
+#!/usr/bin/env python3
+"""wayland-cursor-smoother -- slide the pointer past the gaps in a layout.
+
+Runs outside the compositor. It watches the pointer through a KWin script,
+watches the physical pointing devices for a push, and moves the pointer with a
+virtual absolute device when the two agree that the user is pushing against a
+stretch of display edge with nothing behind it.
+
+    wcsd                     # run it
+    wcsd --check             # report what it would do, and change nothing
+    wcsd --write-config      # write a documented config file
+    wcsd --style warp        # override a setting for this run
+
+Settings live in $XDG_CONFIG_HOME/wayland-cursor-smoother.conf; see
+--write-config. Anything given on the command line wins over the file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from wcs.config import (
+    STYLES,
+    ConfigError,
+    config_path,
+    default_config_text,
+    load_config,
+    with_overrides,
+)
+from wcs.daemon import DEVICE_NAME, Daemon, log
+from wcs.evdev import list_devices
+from wcs.feed import watch_bands
+from wcs.layout import LayoutError, detect_layout
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="wcsd", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", type=Path, metavar="PATH",
+                        help=f"config file to read (default: {config_path()})")
+    parser.add_argument("--write-config", nargs="?", const="-", metavar="PATH",
+                        help="write a documented config file and exit; "
+                             "'-' or no argument writes to stdout")
+    parser.add_argument("--check", action="store_true",
+                        help="report the layout, the bands and the devices, "
+                             "then exit without touching anything")
+    parser.add_argument("--verbose", action="store_true",
+                        help="log every arm and disarm, not just redirects")
+
+    detect = parser.add_argument_group("detection (overrides the config file)")
+    detect.add_argument("--threshold", type=float,
+                        help="outward device counts that count as a push")
+    detect.add_argument("--window", type=float,
+                        help="seconds before a part-finished push is forgotten")
+    detect.add_argument("--cooldown", type=float,
+                        help="seconds after a redirect before another can fire")
+
+    redirect = parser.add_argument_group("redirect (overrides the config file)")
+    redirect.add_argument("--style", choices=STYLES,
+                          help="glide the pointer to its new position, or warp")
+    redirect.add_argument("--duration", type=float,
+                          help="seconds a glide takes")
+    redirect.add_argument("--rate", type=float,
+                          help="positions emitted per second while gliding")
+    redirect.add_argument("--inset", type=int,
+                          help="pixels inside the destination display to land")
+    redirect.add_argument("--max-slide", type=float, dest="max_slide",
+                          help="refuse to slide further than this along an edge")
+    return parser
+
+
+def report(config, verbose: bool) -> int:
+    print(f"config file : {config_path()}"
+          f"{'' if config_path().exists() else '  (absent; using defaults)'}")
+    print(f"detect      : threshold={config.detect.threshold:g} "
+          f"window={config.detect.window:g} cooldown={config.detect.cooldown:g}")
+    print(f"redirect    : style={config.redirect.style} "
+          f"duration={config.redirect.duration:g} rate={config.redirect.rate:g} "
+          f"inset={config.redirect.inset} max_slide={config.redirect.max_slide}")
+
+    try:
+        layout = detect_layout()
+    except LayoutError as exc:
+        print(f"\nlayout      : UNAVAILABLE -- {exc}")
+        return 1
+    box = layout.bounding_box
+    print(f"\nlayout      : {box.width}x{box.height} at ({box.x},{box.y})")
+    for output in layout.outputs:
+        r = output.rect
+        print(f"  {output.name:<10} {r.width}x{r.height} at ({r.x},{r.y})")
+
+    bands = watch_bands(layout, inset=config.redirect.inset,
+                        max_slide=config.redirect.max_slide)
+    print(f"\nwatching    : {len(bands)} band(s)")
+    for band in bands:
+        r = band.rect
+        print(f"  {band.index}  {band.output:<10} push {band.direction.value:<5} "
+              f"{r.width}x{r.height} at ({r.x},{r.y})")
+    if not bands:
+        print("  Nothing to watch. Either the layout is already a clean")
+        print("  rectangle, or max_slide is refusing every band.")
+
+    devices = [d for d in list_devices(exclude_names=[DEVICE_NAME])
+               if d.is_pointing and d.readable]
+    print(f"\ndevices     : {len(devices)} readable pointing device(s)")
+    for device in devices:
+        print(f"  {device.path:<20} {device.name}")
+    if not devices:
+        print("  None. Without one there is no way to see a push;")
+        print("  run tools/probe_evdev_access.py --write-rule.")
+
+    ready = bool(bands) and bool(devices)
+    print(f"\n{'READY' if ready else 'NOT READY'}")
+    return 0 if ready else 1
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+
+    if args.write_config is not None:
+        text = default_config_text()
+        if args.write_config == "-":
+            sys.stdout.write(text)
+        else:
+            path = Path(args.write_config)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            print(f"wrote {path}")
+        return 0
+
+    try:
+        config = with_overrides(
+            load_config(args.config),
+            threshold=args.threshold, window=args.window, cooldown=args.cooldown,
+            style=args.style, duration=args.duration, rate=args.rate,
+            inset=args.inset, max_slide=args.max_slide,
+        )
+    except ConfigError as exc:
+        print(f"config: {exc}", file=sys.stderr)
+        return 2
+
+    if args.check:
+        return report(config, args.verbose)
+
+    try:
+        return Daemon(config, verbose=args.verbose).run()
+    except LayoutError as exc:
+        log(f"cannot read the display layout: {exc}")
+        return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)

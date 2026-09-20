@@ -160,3 +160,60 @@ class LoadTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class OverrideValidationTest(unittest.TestCase):
+    """A command line flag must not accept what the config file refuses.
+
+    Found by running `wcsd --threshold 0 --check`: it was accepted, while
+    `threshold = 0` in the file was not. Zero means fire on contact, which is
+    the behaviour the detector exists to prevent, so the two paths share one
+    set of rules now.
+    """
+
+    def test_a_zero_threshold_is_refused_on_the_command_line_too(self):
+        with self.assertRaises(ConfigError):
+            with_overrides(Config(), threshold=0)
+
+    def test_every_range_rule_applies_to_overrides(self):
+        for field, bad in (
+            ("threshold", 0), ("threshold", -5),
+            ("window", 0), ("cooldown", -1),
+            ("duration", -0.1), ("rate", 0), ("inset", -1), ("max_slide", 0),
+        ):
+            with self.assertRaises(ConfigError, msg=f"{field}={bad}"):
+                with_overrides(Config(), **{field: bad})
+
+    def test_an_unknown_style_is_refused_on_the_command_line_too(self):
+        with self.assertRaises(ConfigError):
+            with_overrides(Config(), style="teleport")
+
+    def test_valid_overrides_still_apply(self):
+        config = with_overrides(Config(), threshold=250, style=WARP, max_slide=500)
+        self.assertEqual(config.detect.threshold, 250)
+        self.assertEqual(config.redirect.style, WARP)
+        self.assertEqual(config.redirect.max_slide, 500)
+
+    def test_the_file_and_the_flag_refuse_with_the_same_message(self):
+        with self.assertRaises(ConfigError) as from_file:
+            parse_config("[detect]\nthreshold = 0\n")
+        with self.assertRaises(ConfigError) as from_flag:
+            with_overrides(Config(), threshold=0)
+        self.assertEqual(str(from_file.exception), str(from_flag.exception))
+
+    def test_an_override_is_coerced_to_the_type_the_file_would_produce(self):
+        # Otherwise a flag stores an int where the file stores a float, and
+        # two configs that should be equal are not.
+        self.assertEqual(with_overrides(Config(), threshold=250),
+                         parse_config("[detect]\nthreshold = 250\n"))
+        self.assertIsInstance(with_overrides(Config(), threshold=250).detect.threshold,
+                              float)
+        self.assertIsInstance(with_overrides(Config(), inset=4).redirect.inset, int)
+
+    def test_a_fractional_pixel_inset_is_refused_rather_than_truncated(self):
+        with self.assertRaises(ConfigError):
+            with_overrides(Config(), inset=2.7)
+
+    def test_a_non_number_override_is_refused(self):
+        with self.assertRaises(ConfigError):
+            with_overrides(Config(), threshold="soon")
