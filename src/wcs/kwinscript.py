@@ -172,3 +172,60 @@ Item {{
     }}
 }}
 """
+
+
+#: The daemon's D-Bus identity. Reverse-DNS of somewhere the project actually
+#: lives, rather than borrowing `org.kde.*`, which is not ours to take.
+BUS_NAME = "io.github.beatenavenue.WaylandCursorSmoother"
+OBJECT_PATH = "/io/github/beatenavenue/WaylandCursorSmoother"
+FEED_INTERFACE = "io.github.beatenavenue.WaylandCursorSmoother.Feed"
+
+
+def link_script(throttle: int = 30) -> str:
+    """A KWin script that calls the daemon on every ``throttle``-th motion.
+
+    Two methods on purpose. ``callDBus`` marshals JS values into D-Bus types
+    without the script saying which, so whether a JS number arrives as
+    something the daemon's signature accepts is a question about the bridge,
+    not about our code. Sending the same reading as a preformatted string as
+    well means one run says which of the two actually lands -- and if only the
+    string does, the production feed uses strings and nothing is lost.
+
+    Throttling matters as much as the call. ``cursorPosChanged`` fires on
+    every motion; calling D-Bus that often would be thousands of round trips
+    a second. The finished feed will call out on a state *change* rather than
+    on a sample, but the probe needs a steady stream to measure, so it takes
+    every Nth.
+    """
+    return (
+        "// wayland-cursor-smoother: can a KWin script reach the daemon?\n"
+        "\n"
+        "var seen = 0;\n"
+        "var sent = 0;\n"
+        "\n"
+        "function deliver(x, y) {\n"
+        "    sent += 1;\n"
+        "    // Typed: two integers, as the finished feed would prefer.\n"
+        "    callDBus(SERVICE, OBJECT, IFACE, 'PositionInts', x, y, sent);\n"
+        "    // Untyped: the same reading, immune to marshalling surprises.\n"
+        "    callDBus(SERVICE, OBJECT, IFACE, 'PositionString',\n"
+        "             x + ',' + y + ',' + sent);\n"
+        "}\n"
+        "\n"
+        "function onMoved() {\n"
+        "    seen += 1;\n"
+        "    if (seen % THROTTLE !== 0) { return; }\n"
+        "    var p = workspace.cursorPos;\n"
+        "    deliver(p.x, p.y);\n"
+        "}\n"
+        "\n"
+        "var start = workspace.cursorPos;\n"
+        "print(MARK + ' link loaded at ' + start.x + ',' + start.y);\n"
+        "deliver(start.x, start.y);\n"
+        "workspace.cursorPosChanged.connect(onMoved);\n"
+        "print(MARK + ' link connected, reporting every THROTTLE moves');\n"
+    ).replace("SERVICE", f'"{BUS_NAME}"') \
+     .replace("OBJECT", f'"{OBJECT_PATH}"') \
+     .replace("IFACE", f'"{FEED_INTERFACE}"') \
+     .replace("THROTTLE", str(throttle)) \
+     .replace("MARK", f'"{MARKER}"')
