@@ -184,6 +184,16 @@ def access_verdict(devices: Iterable[InputDevice]) -> Verdict:
                    "pointing devices readable, and no keyboard granted by a rule")
 
 
+def would_grant(devices: Iterable[InputDevice]) -> list[InputDevice]:
+    """The nodes the rule matches: a pointer role, and no keyboard tag.
+
+    Mirrors ``udev_rule_text()`` so the two can be read against each other.
+    Its point is to be run *before* installing anything: a rule whose effect
+    is only visible after it is in place is a rule nobody checks.
+    """
+    return [d for d in devices if d.is_pointing and not d.is_keyboard]
+
+
 def udev_rule_text() -> str:
     """The rule to install, with its reasoning attached.
 

@@ -43,6 +43,7 @@ from wcs.evdev import (
     InputDevice,
     access_verdict,
     decode_events,
+    would_grant,
     install_commands,
     list_devices,
     motion_magnitude,
@@ -78,15 +79,22 @@ def report_devices(devices: list[InputDevice]) -> None:
         for d in combos:
             print(f"    {d.path}  {d.name}")
 
-    risky = [d for d in devices
-             if d.is_pointing and not d.is_keyboard and d.text_key_count]
+    matched = would_grant(devices)
+    section("what the rule would grant")
+    if not matched:
+        print("  Nothing. No node carries a pointer role without a keyboard tag.")
+        return
+    for d in matched:
+        state = "already readable" if d.readable else "NEW"
+        keys = f"{d.text_key_count} text key(s)" if d.text_key_count else "no text keys"
+        print(f"  {state:<16} {os.path.basename(d.path):<10} {keys:<16} {d.name}")
+
+    risky = [d for d in matched if d.text_key_count]
     if risky:
-        print("\n  These are pointers the rule DOES grant, and they also carry keys")
-        print("  that could spell something. Check what they are before accepting:")
-        for d in risky:
-            print(f"    {d.path}  {d.text_key_count} text key(s)  {d.name}")
+        print("\n  WARNING: the marked nodes above also carry keys that could spell")
+        print("  something. Decide what they are before accepting the rule.")
     else:
-        print("\n  No node the rule grants carries a key that could spell anything.")
+        print("\n  None of them carries a key that could spell anything.")
 
 
 def report_verdict(devices: list[InputDevice]) -> bool:

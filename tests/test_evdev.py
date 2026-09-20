@@ -35,6 +35,7 @@ from wcs.evdev import (  # noqa: E402
     parse_udev_properties,
     text_keys,
     udev_rule_text,
+    would_grant,
 )
 
 
@@ -268,3 +269,33 @@ class CapabilityBitmaskTest(unittest.TestCase):
 
     def test_empty_bitmask(self):
         self.assertEqual(parse_capability_bitmask(""), set())
+
+
+class WouldGrantTest(unittest.TestCase):
+    """The preview has to agree with the rule, or it is worse than nothing."""
+
+    def test_a_plain_mouse_is_granted(self):
+        self.assertEqual(would_grant([MOUSE]), [MOUSE])
+
+    def test_a_keyboard_is_not(self):
+        self.assertEqual(would_grant([KEYBOARD]), [])
+
+    def test_a_pointer_that_is_also_a_keyboard_is_not(self):
+        self.assertEqual(would_grant([COMBO]), [])
+
+    def test_a_pointer_node_carrying_non_text_keys_is_granted(self):
+        # The TrackPoint Keyboard II's pointer half: keys, but not a keyboard.
+        stick = device("/dev/input/event14", "Lenovo TrackPoint Keyboard II",
+                       {"keys", "mouse", "pointingstick"}, False)
+        self.assertEqual(would_grant([stick]), [stick])
+
+    def test_a_tablet_or_joystick_is_not(self):
+        pen = device("/dev/input/event30", "XP-Pen Pen", {"keys", "tablet"}, False)
+        pad = device("/dev/input/event8", "Gamepad", {"joystick"}, False)
+        self.assertEqual(would_grant([pen, pad]), [])
+
+    def test_the_preview_matches_what_the_verdict_would_accept(self):
+        stick = device("/dev/input/event14", "stick", {"keys", "mouse"}, True)
+        granted = would_grant([MOUSE, KEYBOARD, COMBO, stick])
+        self.assertTrue(access_verdict(granted).ok)
+        self.assertEqual(access_verdict(granted).keyboards_we_granted, ())

@@ -998,3 +998,41 @@ the order the kernel checks them.
 unrelated to this project.** Anything running as the author — or as anyone
 else on that system — can read that keyboard today. Whether to tighten the
 vendor's rule is a separate decision from anything here.
+
+### Measured, 2026-09-20: every node the rule grants is free of text keys
+
+The key-capability count run on the author's 38 nodes. What the rule grants:
+
+```
+NEW              event1     no text keys   XING WEI ... Composite Device Mouse
+already readable event4     no text keys   XP-PEN DECO 03 Mouse
+already readable event6     no text keys   XP-PEN DECO 03
+NEW              event8     no text keys   RP2040 HID Remapper MIPB Mouse
+NEW              event14    no text keys   Lenovo TrackPoint Keyboard II
+```
+
+`event14` — the TrackPoint's pointer half, the node whose `ID_INPUT_KEY` tag
+prompted the measurement — carries **zero** keys that could spell anything.
+The tag came from buttons, as expected, but it is now measured rather than
+expected.
+
+For contrast, every node the rule refuses that *is* a keyboard reports 47.
+`SC211 (AVRCP)`, a Bluetooth audio remote, reports 11 and is refused anyway
+for having no pointer role.
+
+The probe now prints this preview **before** anything is installed, under
+"what the rule would grant", marking each node NEW or already readable.
+`would_grant()` mirrors `udev_rule_text()`; `tests/test_evdev.py` pins the two
+to the same answer, including that a pointer node carrying non-text keys is
+granted and a combined keyboard-pointer node is not.
+
+### The author's ruling on the XP-Pen exposure
+
+Accepted as not worth acting on: the exposed node is a tablet's auxiliary
+keyboard, and its keystrokes being read would not cost anything.
+
+One fact was raised in response and is recorded because it is a different
+risk from the one weighed, not because the ruling is in doubt: `other::rw-`
+is **read and write**. Writing to an evdev node injects events, so any
+process on that system can send key events into the session through it.
+Reading was the risk considered; injection was not.
