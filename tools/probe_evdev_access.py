@@ -38,6 +38,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wcs.evdev import (
+    GRANT_EXPLANATIONS,
     RULE_FILENAME,
     InputDevice,
     access_verdict,
@@ -58,34 +59,66 @@ def section(title: str) -> None:
 
 def report_devices(devices: list[InputDevice]) -> None:
     section("input devices, and what we may read")
-    print(f"  {'node':<20} {'read':<5} {'roles':<32} name")
+    print(f"  {'node':<10} {'read':<5} {'by':<6} {'txt':<4} "
+          f"{'roles':<28} name")
     for d in devices:
-        print(f"  {d.path:<20} {'yes' if d.readable else 'no':<5} "
-              f"{d.role_summary:<32} {d.name}")
+        keys = str(d.text_key_count) if d.text_key_count else "-"
+        print(f"  {os.path.basename(d.path):<10} {'yes' if d.readable else 'no':<5} "
+              f"{(d.grant if d.readable else '-'):<6} {keys:<4} "
+              f"{d.role_summary:<28} {d.name}")
+    print("\n  by  = what makes it readable: world (mode bits), group, acl")
+    print("  txt = keys on that node that could spell something")
 
     combos = [d for d in devices
               if d.is_keyboard and d.roles & {"mouse", "pointingstick", "touchpad"}]
     if combos:
-        print("\n  NOTE: these nodes carry both a keyboard and a pointer:")
+        print("\n  These nodes carry both a keyboard and a pointer. One node cannot")
+        print("  be split, so reading such a device's motion means reading its")
+        print("  keystrokes. The rule never grants them:")
         for d in combos:
-            print(f"    {d.path}  {d.name}  (readable: {'yes' if d.readable else 'no'})")
-        print("  One node cannot be split, so reading such a device's motion means")
-        print("  reading its keystrokes. The rule never grants them. If one is")
-        print("  readable anyway, something else granted it -- see below.")
-        print("  A TrackPoint that appears here is not usable for detection; one")
-        print("  that appears as its own pointer-only node is.")
+            print(f"    {d.path}  {d.name}")
+
+    risky = [d for d in devices
+             if d.is_pointing and not d.is_keyboard and d.text_key_count]
+    if risky:
+        print("\n  These are pointers the rule DOES grant, and they also carry keys")
+        print("  that could spell something. Check what they are before accepting:")
+        for d in risky:
+            print(f"    {d.path}  {d.text_key_count} text key(s)  {d.name}")
+    else:
+        print("\n  No node the rule grants carries a key that could spell anything.")
 
 
 def report_verdict(devices: list[InputDevice]) -> bool:
     verdict = access_verdict(devices)
     section("VERDICT")
-    print(f"readable pointing devices : {len(verdict.readable_pointing)}")
+    print(f"readable pointing devices        : {len(verdict.readable_pointing)}")
     for path in verdict.readable_pointing:
         print(f"    {path}")
-    print(f"readable keyboards        : {len(verdict.readable_keyboards)}   <- must be 0")
-    for path in verdict.readable_keyboards:
+    print(f"keyboards readable via an ACL    : {len(verdict.keyboards_we_granted)}"
+          f"   <- must be 0; this is ours")
+    for path in verdict.keyboards_we_granted:
+        print(f"    {path}")
+    print(f"keyboards already open to us     : {len(verdict.keyboards_already_open)}"
+          f"   <- pre-existing, not ours")
+    for path in verdict.keyboards_already_open:
         print(f"    {path}")
     print()
+
+    if verdict.keyboards_already_open:
+        print("Those last ones were readable before this project existed. Nothing")
+        print("here granted them and removing this rule will not close them. They")
+        print("are worth looking at anyway:")
+        for path in verdict.keyboards_already_open:
+            print(f"\n  {path}:")
+            print(_indent(_run(["getfacl", "-p", path]) or "<getfacl unavailable>", "      "))
+        print("\n  `other::rw-` means a udev rule set that node world-readable --")
+        print("  usually a vendor rule shipped for a tablet or a gaming device,")
+        print("  applied to every interface of the device rather than just the one")
+        print("  that needed it. `group::rw-` plus membership means the `input`")
+        print("  group; check `id -nG`.")
+        print()
+
     if verdict.ok:
         print(f"PASS -- {verdict.reason}.")
         return True
@@ -94,12 +127,6 @@ def report_verdict(devices: list[InputDevice]) -> bool:
     if not verdict.readable_pointing:
         print("If the rule is not installed yet, that is the expected state:")
         print("run again with --write-rule.")
-    for path in verdict.readable_keyboards:
-        print(f"\nWho granted {path}:")
-        print(_indent(_run(["getfacl", "-p", path]) or "<getfacl unavailable>"))
-        print("  If an entry names you directly, a udev rule or an ACL did it.")
-        print("  If it is a group entry, check `id -nG` -- joining `input` has")
-        print("  exactly this effect and is what this design rejects.")
     return False
 
 

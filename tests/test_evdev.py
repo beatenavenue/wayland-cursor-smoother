@@ -14,6 +14,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wcs.evdev import (  # noqa: E402
     EV_ABS,
+    GRANT_ACL,
+    GRANT_EXPLANATIONS,
+    GRANT_GROUP,
+    GRANT_NONE,
+    GRANT_WORLD,
     EV_KEY,
     EV_REL,
     REL_X,
@@ -23,15 +28,21 @@ from wcs.evdev import (  # noqa: E402
     _INPUT_EVENT,
     access_verdict,
     classify,
+    classify_grant,
     decode_events,
     motion_magnitude,
+    parse_capability_bitmask,
     parse_udev_properties,
+    text_keys,
     udev_rule_text,
 )
 
 
-def device(path, name, roles, readable):
-    return InputDevice(path=path, name=name, roles=frozenset(roles), readable=readable)
+def device(path, name, roles, readable, grant=None):
+    if grant is None:
+        grant = GRANT_ACL if readable else GRANT_NONE
+    return InputDevice(path=path, name=name, roles=frozenset(roles),
+                       readable=readable, grant=grant)
 
 
 MOUSE = device("/dev/input/event3", "Logitech MX Master", {"mouse"}, True)
@@ -83,22 +94,38 @@ class VerdictTest(unittest.TestCase):
         verdict = access_verdict([MOUSE, TRACKPOINT, KEYBOARD])
         self.assertTrue(verdict.ok)
         self.assertEqual(verdict.readable_pointing, (MOUSE.path, TRACKPOINT.path))
-        self.assertEqual(verdict.readable_keyboards, ())
+        self.assertEqual(verdict.keyboards_we_granted, ())
 
-    def test_a_readable_keyboard_fails_even_though_the_feature_would_work(self):
-        # This is the `input` group outcome: everything the detector needs is
-        # present, and the rule has still failed at its actual job.
+    def test_a_keyboard_granted_by_an_acl_fails(self):
+        # Everything the detector needs is present, and the rule has still
+        # failed at its actual job.
         verdict = access_verdict([MOUSE, device(KEYBOARD.path, KEYBOARD.name,
-                                                KEYBOARD.roles, True)])
+                                                KEYBOARD.roles, True, GRANT_ACL)])
         self.assertFalse(verdict.ok)
-        self.assertIn("too wide", verdict.reason)
+        self.assertEqual(verdict.keyboards_we_granted, (KEYBOARD.path,))
 
-    def test_a_combined_keyboard_and_pointer_node_fails(self):
+    def test_a_keyboard_left_world_readable_by_somebody_else_does_not_fail_us(self):
+        # The first real run met exactly this: a tablet vendor's udev rule had
+        # set mode 0666 across its own nodes, keyboard interface included.
+        # It is reported, but it is not this rule's doing and not its to fix.
+        vendor = device("/dev/input/event7", "XP-PEN DECO 03 Keyboard",
+                        {"keyboard", "keys"}, True, GRANT_WORLD)
+        verdict = access_verdict([MOUSE, vendor])
+        self.assertTrue(verdict.ok)
+        self.assertEqual(verdict.keyboards_we_granted, ())
+        self.assertEqual(verdict.keyboards_already_open, (vendor.path,))
+
+    def test_the_input_group_shows_up_as_already_open_too(self):
+        verdict = access_verdict([MOUSE, device(KEYBOARD.path, KEYBOARD.name,
+                                                KEYBOARD.roles, True, GRANT_GROUP)])
+        self.assertEqual(verdict.keyboards_already_open, (KEYBOARD.path,))
+
+    def test_a_combined_keyboard_and_pointer_node_granted_by_acl_fails(self):
         # A single node carrying both is not something a rule can split:
         # granting its motion grants its keystrokes.
         verdict = access_verdict([COMBO])
         self.assertFalse(verdict.ok)
-        self.assertEqual(verdict.readable_keyboards, (COMBO.path,))
+        self.assertEqual(verdict.keyboards_we_granted, (COMBO.path,))
 
     def test_nothing_readable_is_reported_as_not_in_effect(self):
         verdict = access_verdict([device(MOUSE.path, MOUSE.name, MOUSE.roles, False),
@@ -186,3 +213,58 @@ class SortOrderTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GrantSourceTest(unittest.TestCase):
+    """Why a node is readable, not merely whether it is.
+
+    The first real run found a keyboard node at mode 0666 -- granted by a
+    tablet vendor's own udev rule, long before this project existed. Reporting
+    that as "our rule is too wide" would have sent the reader to edit a rule
+    that was not responsible.
+    """
+
+    def test_world_readable_is_not_ours(self):
+        self.assertEqual(classify_grant(0o666, 104, [1000], True), GRANT_WORLD)
+
+    def test_group_readable_when_we_are_in_that_group(self):
+        self.assertEqual(classify_grant(0o660, 104, [1000, 104], True), GRANT_GROUP)
+
+    def test_readable_despite_mode_bits_means_an_acl(self):
+        self.assertEqual(classify_grant(0o660, 104, [1000], True), GRANT_ACL)
+
+    def test_world_beats_acl_because_it_is_the_one_doing_the_work(self):
+        self.assertEqual(classify_grant(0o666, 104, [1000, 104], True), GRANT_WORLD)
+
+    def test_unreadable_is_reported_as_such_whatever_the_mode(self):
+        self.assertEqual(classify_grant(0o666, 104, [1000], False), GRANT_NONE)
+
+    def test_every_source_has_an_explanation(self):
+        for source in (GRANT_WORLD, GRANT_GROUP, GRANT_ACL, GRANT_NONE):
+            self.assertIn(source, GRANT_EXPLANATIONS)
+
+
+class CapabilityBitmaskTest(unittest.TestCase):
+    def test_mouse_buttons_decode_to_their_codes(self):
+        bits = parse_capability_bitmask("0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 70000 0 0 0 0")
+        self.assertEqual(bits, {0x110, 0x111, 0x112})
+
+    def test_mouse_buttons_are_not_text_keys(self):
+        self.assertEqual(text_keys({0x110, 0x111, 0x112}), set())
+
+    def test_letters_and_digits_are_text_keys(self):
+        # KEY_A=30, KEY_Z=44, KEY_1=2, KEY_SPACE=57
+        self.assertEqual(text_keys({30, 44, 2, 57}), {30, 44, 2, 57})
+
+    def test_media_keys_are_not_text_keys(self):
+        # KEY_MUTE=113, KEY_VOLUMEDOWN=114, KEY_VOLUMEUP=115, KEY_PLAYPAUSE=164
+        self.assertEqual(text_keys({113, 114, 115, 164}), set())
+
+    def test_a_node_with_both_is_reported_by_its_text_keys_only(self):
+        self.assertEqual(text_keys({0x110, 113, 30}), {30})
+
+    def test_malformed_groups_are_skipped_rather_than_raising(self):
+        self.assertEqual(parse_capability_bitmask("zzz 3"), {0, 1})
+
+    def test_empty_bitmask(self):
+        self.assertEqual(parse_capability_bitmask(""), set())

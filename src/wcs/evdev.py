@@ -80,12 +80,52 @@ def classify(properties: dict[str, str]) -> frozenset[str]:
     )
 
 
+#: How a node came to be readable. The distinction matters because only one
+#: of these is something this project did, and a verdict that blames our rule
+#: for a permission somebody else granted sends the reader to fix the wrong
+#: thing.
+GRANT_WORLD = "world"      # mode bits let everyone read it
+GRANT_GROUP = "group"      # we are in the owning group -- e.g. `input`
+GRANT_ACL = "acl"          # an ACL names us: uaccess, or a hand-written rule
+GRANT_NONE = "none"
+
+
+def classify_grant(mode: int, gid: int, my_gids: Iterable[int],
+                   readable: bool) -> str:
+    """Why a node is (or is not) readable, from its mode and our groups.
+
+    Checked in the order the kernel checks them, so a node that is both
+    world-readable and covered by an ACL is reported as world-readable: that
+    is the permission actually doing the work, and the one worth removing.
+    """
+    if not readable:
+        return GRANT_NONE
+    if mode & 0o004:
+        return GRANT_WORLD
+    if mode & 0o040 and gid in set(my_gids):
+        return GRANT_GROUP
+    return GRANT_ACL
+
+
+GRANT_EXPLANATIONS = {
+    GRANT_WORLD: "mode bits make it readable by everyone on the system",
+    GRANT_GROUP: "we are in the group that owns it",
+    GRANT_ACL: "an ACL names us -- uaccess, or a rule that grants directly",
+    GRANT_NONE: "not readable",
+}
+
+
 @dataclass(frozen=True)
 class InputDevice:
     path: str
     name: str
     roles: frozenset[str]
     readable: bool
+    grant: str = GRANT_NONE
+    text_key_count: int = 0
+    """How many keys this node has that could spell something. `keys` in the
+    roles means only that some KEY_* code exists -- a volume button counts --
+    so this is what decides whether reading the node could observe typing."""
 
     @property
     def is_pointing(self) -> bool:
@@ -104,30 +144,44 @@ class InputDevice:
 class Verdict:
     ok: bool
     readable_pointing: tuple[str, ...]
-    readable_keyboards: tuple[str, ...]
+    keyboards_we_granted: tuple[str, ...]
+    keyboards_already_open: tuple[str, ...]
     reason: str
 
 
 def access_verdict(devices: Iterable[InputDevice]) -> Verdict:
     """Is access shaped the way this project asks for?
 
-    Two conditions, and the second matters more than the first.  Some pointing
-    device must be readable or there is nothing to detect with — but *no*
-    keyboard may be readable, because that is the whole difference between
-    this and joining the `input` group, and a rule that quietly grants it has
-    failed even while the feature works.
+    Two conditions, and they are separated on purpose.
+
+    Some pointing device must be readable or there is nothing to detect with.
+    And no keyboard may be readable *because of us* -- that is the whole
+    difference between this and joining the `input` group, and a rule that
+    quietly granted one would have failed even while the feature worked.
+
+    A keyboard that was already readable before this project existed is a
+    different finding. The first real run met one: a tablet vendor's udev rule
+    had set mode 0666 on all of its own nodes, its keyboard interface
+    included. Reporting that as "our rule is too wide" would have sent the
+    reader to edit a rule that was not responsible. It is still worth saying
+    out loud, so it is reported separately rather than folded into the
+    verdict.
     """
     devices = list(devices)
     pointing = tuple(d.path for d in devices if d.is_pointing and d.readable)
-    keyboards = tuple(d.path for d in devices if d.is_keyboard and d.readable)
-    if keyboards:
-        return Verdict(False, pointing, keyboards,
-                       "a keyboard is readable; the rule is too wide")
+    keyboards = [d for d in devices if d.is_keyboard and d.readable]
+    ours = tuple(d.path for d in keyboards if d.grant == GRANT_ACL)
+    already = tuple(d.path for d in keyboards if d.grant != GRANT_ACL)
+
+    if ours:
+        return Verdict(False, pointing, ours, already,
+                       "a keyboard is readable through an ACL; something granted "
+                       "it directly and this rule must not")
     if not pointing:
-        return Verdict(False, pointing, keyboards,
+        return Verdict(False, pointing, ours, already,
                        "no pointing device is readable; the rule is not in effect")
-    return Verdict(True, pointing, keyboards,
-                   "pointing devices readable, no keyboard readable")
+    return Verdict(True, pointing, ours, already,
+                   "pointing devices readable, and no keyboard granted by a rule")
 
 
 def udev_rule_text() -> str:
@@ -183,6 +237,58 @@ def uninstall_commands() -> list[str]:
     ]
 
 
+# Key codes that can spell. A node carrying any of these can observe typed
+# text; one carrying only volume, play/pause and similar cannot. This is the
+# distinction `ID_INPUT_KEY` does not draw -- it is set for any KEY_* code at
+# all, so a pointer with a couple of media buttons carries it, and so would a
+# keylogger. Ranges from linux/input-event-codes.h.
+_TEXT_KEY_RANGES = (
+    (2, 13),    # KEY_1 .. KEY_EQUAL
+    (16, 27),   # KEY_Q .. KEY_RIGHTBRACE
+    (30, 41),   # KEY_A .. KEY_GRAVE
+    (44, 53),   # KEY_Z .. KEY_SLASH
+    (57, 57),   # KEY_SPACE
+)
+
+
+def parse_capability_bitmask(text: str) -> set[int]:
+    """Decode a /sys/class/input/*/device/capabilities/* bitmask.
+
+    The kernel prints it as space-separated hex longs, most significant
+    group first, each group covering 64 bits on a 64-bit kernel.
+    """
+    groups = text.split()
+    bits: set[int] = set()
+    for index, group in enumerate(reversed(groups)):
+        try:
+            value = int(group, 16)
+        except ValueError:
+            continue
+        base = index * 64
+        while value:
+            low = value & -value
+            bits.add(base + low.bit_length() - 1)
+            value ^= low
+    return bits
+
+
+def text_keys(key_bits: set[int]) -> set[int]:
+    """The subset of ``key_bits`` that could spell something."""
+    return {
+        bit
+        for bit in key_bits
+        if any(low <= bit <= high for low, high in _TEXT_KEY_RANGES)
+    }
+
+
+def read_key_capabilities(event_node: str) -> set[int]:
+    try:
+        with open(f"/sys/class/input/{event_node}/device/capabilities/key") as handle:
+            return parse_capability_bitmask(handle.read())
+    except OSError:
+        return set()
+
+
 def _device_name(event_node: str) -> str:
     try:
         with open(f"/sys/class/input/{event_node}/device/name") as handle:
@@ -214,12 +320,20 @@ def list_devices(exclude_names: Iterable[str] = ()) -> list[InputDevice]:
             )
             if proc.returncode == 0:
                 properties = parse_udev_properties(proc.stdout)
+        readable = os.access(path, os.R_OK)
+        try:
+            info = os.stat(path)
+            grant = classify_grant(info.st_mode, info.st_gid, os.getgroups(), readable)
+        except OSError:
+            grant = GRANT_ACL if readable else GRANT_NONE
         devices.append(
             InputDevice(
                 path=path,
                 name=name,
                 roles=classify(properties),
-                readable=os.access(path, os.R_OK),
+                readable=readable,
+                grant=grant,
+                text_key_count=len(text_keys(read_key_capabilities(node))),
             )
         )
     return devices

@@ -928,3 +928,73 @@ report positions rather than deltas, and a detector that only understood
 events would feed each redirect straight into the detector that requested it.
 Not yet a live bug — the detector does not exist — but the loop is easy to
 build by accident.
+
+## Device survey, 2026-09-20: the TrackPoint is fine, and something else is not
+
+First run of `tools/probe_evdev_access.py` on the author's machine, 38 event
+nodes. Three findings.
+
+### The TrackPoint splits, so the rule works
+
+```
+event13   keyboard,keys,pointingstick   Lenovo TrackPoint Keyboard II
+event14   keys,mouse,pointingstick      Lenovo TrackPoint Keyboard II
+```
+
+`event14` carries **no `keyboard` tag**, so the rule grants it, and that is the
+node the TrackPoint's motion comes out of. `event13` is the keyboard and stays
+refused. The expectation recorded above holds on this hardware.
+
+Two nodes *are* unsalvageable, and both are named rather than silently
+skipped: `event13` itself, and `event31` (`XP-Pen Mouse`, tagged
+`keyboard,keys,mouse`). Neither is needed.
+
+### `keys` is not `keyboard`, and the difference had to be measured
+
+`event14` carries `ID_INPUT_KEY`. That is *not* `ID_INPUT_KEYBOARD`: udev sets
+the former for any `KEY_*` code at all — a volume button earns it — and the
+latter only for a full alphabetic set. So "the rule grants a node with keys on
+it" is true and says nothing about whether reading it could observe typing.
+
+Rather than reason about it, the probe now reads
+`/sys/class/input/<node>/device/capabilities/key` and counts how many of the
+codes could spell something (`KEY_1`..`KEY_EQUAL`, `KEY_Q`..`KEY_RIGHTBRACE`,
+`KEY_A`..`KEY_GRAVE`, `KEY_Z`..`KEY_SLASH`, `KEY_SPACE`). A node the rule
+grants with a non-zero count is called out; zero is stated explicitly rather
+than left as an absence.
+
+### A keyboard was already world-readable, and it is not ours
+
+The probe's first verdict was `NOT YET -- a keyboard is readable`. It was
+`event7`, `XP-PEN DECO 03 Keyboard`, and `getfacl` gave the reason:
+
+```
+# owner: root
+# group: input
+user::rw-
+group::rw-
+other::rw-
+```
+
+`other::rw-` — mode 0666. Every node of that tablet is world **readable and
+writable**, its keyboard interface included, and has been since before this
+project existed. A vendor udev rule applied to the whole device rather than to
+the interface that needed it.
+
+**The verdict was wrong to blame the rule for it**, and would have sent the
+reader to edit a file that was not responsible. `access_verdict()` now
+separates:
+
+- *keyboards readable via an ACL* — something granted them directly. This rule
+  must never produce one, and a non-zero count fails.
+- *keyboards already open* — world- or group-readable regardless of us.
+  Reported with `getfacl`, and does not fail the verdict, because removing
+  this project's rule would not close them.
+
+`classify_grant()` decides which, from the mode bits and our group list, in
+the order the kernel checks them.
+
+**Worth saying plainly: this is a real exposure on the machine and it is
+unrelated to this project.** Anything running as the author — or as anyone
+else on that system — can read that keyboard today. Whether to tighten the
+vendor's rule is a separate decision from anything here.
