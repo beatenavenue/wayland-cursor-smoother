@@ -57,6 +57,10 @@ from .motion import glide, max_legible_duration, redirect_path
 from .uinput import AxisMapping, VirtualPointer
 
 PLUGIN_NAME = "wayland-cursor-smoother"
+#: Printed by the feed script on load. Distinctive enough to grep the
+#: compositor's journal for, which is the first question when nothing
+#: arrives: did the script load at all?
+FEED_MARKER = "wcs-feed"
 DEVICE_NAME = "wayland-cursor-smoother virtual pointer"
 
 
@@ -84,6 +88,7 @@ class Daemon:
         self._script_path: Optional[Path] = None
         self._caller = find_dbus_caller()
         self._redirects = 0
+        self._edges = 0
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -112,7 +117,13 @@ class Daemon:
         daemon = self
 
         class Feed(dbus.service.Object):
-            @dbus.service.method(FEED_INTERFACE, in_signature="iii")
+            # No in_signature, deliberately. The link probe that proved this
+            # path works declared none and accepted whatever callDBus
+            # marshalled. Declaring one here was a deviation from the only
+            # configuration ever tested, and a signature the caller does not
+            # match is refused with an error reply that callDBus discards --
+            # which looks exactly like nothing happening at all.
+            @dbus.service.method(FEED_INTERFACE)
             def Edge(self, index, x, y):
                 daemon._on_edge(int(index), float(x), float(y))
 
@@ -144,7 +155,7 @@ class Daemon:
         return 0
 
     def stop(self) -> None:
-        log(f"stopping after {self._redirects} redirect(s)")
+        log(f"stopping after {self._edges} edge report(s) and {self._redirects} redirect(s)")
         self._unload_script()
         for fd in list(self._devices):
             try:
@@ -182,7 +193,7 @@ class Daemon:
     def _load_script(self) -> None:
         self._unload_script()
         text = feed_script(self.bands, bus_name=BUS_NAME, object_path=OBJECT_PATH,
-                           interface=FEED_INTERFACE)
+                           interface=FEED_INTERFACE, marker=FEED_MARKER)
         handle, name = tempfile.mkstemp(prefix="wcs-feed-", suffix=".js")
         with os.fdopen(handle, "w") as out:
             out.write(text)
@@ -265,6 +276,9 @@ class Daemon:
     # -- the feed ----------------------------------------------------------
 
     def _on_edge(self, index: int, x: float, y: float) -> None:
+        self._edges += 1
+        if self.verbose and self._edges == 1:
+            log(f"first Edge received: band={index} at ({x:.0f},{y:.0f})")
         self._position = Point(x, y)
         now = time.monotonic()
         if index < 0 or index >= len(self.bands):
