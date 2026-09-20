@@ -5,8 +5,11 @@ KDE/Wayland Screen-Edge Cursor Smoother
 > **Status: WIP — research only. No implementation exists yet.**
 >
 > This repository contains no code. What follows is a problem statement and a
-> record of which approaches have been investigated and ruled out. Nothing here
-> runs.
+> record of which approaches have been investigated and ruled out.
+>
+> The findings are written to be useful on their own. If this project is never
+> finished, the section below on KWin's corner barrier should still save
+> somebody the day it cost me.
 
 ## Motivation
 
@@ -16,19 +19,15 @@ When building a multi-display setup, the usual best practice is to line up ident
 
 **wayland-cursor-smoother** aims to let the pointer glide smoothly across discontinuities at display corners, similar to Windows 11’s “Ease cursor movement between displays” option. Ideally this should be a baseline capability of Wayland itself; I hope this program becomes unnecessary sooner rather than later.
 
-## What this is *not*: KWin's edge and corner barriers
+## If you found `CornerBarrier` and thought that was the fix
 
-KWin has settings with confusingly adjacent names that do **not** solve this
-problem, and it is worth being explicit about them.
+It is not. This trips up nearly everyone who searches for this problem,
+including me, and it is convincing enough that people announce it as the
+solution before testing it properly.
 
-Since Plasma 6.1 KWin applies a deliberate *edge barrier* when the pointer
-crosses between screens (`EdgeBarrier`, default 100px of resistance) and a much
-stronger *corner barrier* within 15px of an output corner (`CornerBarrier`,
-default on, 2000px — effectively impassable). The corner barrier exists to make
-screen-edge and hot-corner actions reliably hittable on multi-monitor setups.
+### Why it looks like the answer
 
-**These are the opposite of what this project wants.** They add resistance on
-purpose. Turning them off:
+Search for a stuck cursor between KDE monitors and you will find this:
 
 ```ini
 # ~/.config/kwinrc
@@ -37,18 +36,54 @@ CornerBarrier=false
 EdgeBarrier=0
 ```
 
-removes resistance where the pointer already has somewhere to go. It does not
-create screen area where there is none. The problem in the screenshot above is
-the vertical bands along an output edge that no neighbouring output covers —
-genuine geometry, not added stickiness.
+The names match the symptom. Plasma 6.1 did introduce these. They genuinely do
+govern pointer movement between screens. And when you apply them, **the
+behaviour visibly changes** — which is exactly what makes the trap work.
 
-Worth doing anyway if the barriers annoy you, since it is free. It is not a
-substitute for this project.
+### What they actually do
 
-For contrast, Windows' *Ease cursor movement between displays* actively
-redirects: on hitting a dead band it slides the pointer along the edge and into
-the adjacent display. No KWin setting does that. That redirection is what this
-project is for.
+Both add resistance *on purpose*:
+
+- `EdgeBarrier` (default 100) — the pointer must be pushed this far past a
+  screen edge before it crosses to the adjacent screen. Intended to stop you
+  overshooting onto the next monitor by accident.
+- `CornerBarrier` (default on) — within 15px (Manhattan) of an output corner
+  the resistance becomes 2000px, effectively impassable. Intended to make
+  hot-corner and screen-edge actions reliably hittable, instead of sliding onto
+  the neighbouring screen before you can trigger them.
+
+Turning them off removes resistance **where the pointer already had somewhere
+to go**. That is a real improvement, and it is why people believe they have
+solved it. Then they hit the dead band again.
+
+These settings cannot create screen area that does not exist.
+
+### Telling the two problems apart
+
+Run the pointer slowly along the edge shared with the next monitor and push
+outward at each height:
+
+- **It crosses once you push firmly** → that is the barrier. The settings above
+  will fix it, and you are done.
+- **There is a stretch of that edge where it never crosses, no matter how hard
+  or how slowly you push** → that is geometry. Your monitors do not overlap at
+  those heights, so there is no destination to move to. No KWin setting will
+  help, because nothing is in the way — there is simply nothing on the other
+  side.
+
+The red bands in the screenshot above are the second kind. They mark the
+stretches of the centre display's edges that the neighbouring displays do not
+span.
+
+### What would actually solve it
+
+Windows' *Ease cursor movement between displays* does not remove resistance —
+it **redirects**. On reaching a stretch of edge with no neighbour, it slides the
+pointer along that edge and into the nearest valid point of the adjacent
+display.
+
+Removing resistance is not the same as adding redirection. Nothing in KWin
+currently does the latter. That is what this project is for.
 
 ## Approaches investigated and rejected
 
