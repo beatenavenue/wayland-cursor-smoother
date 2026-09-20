@@ -767,3 +767,64 @@ slide distances here run to a few hundred pixels, which is far enough to lose.
 
 Worth trying both once detection exists. Do not assume the warp is correct
 just because it is what the platform does natively.
+
+## Landing test, 2026-09-20: the behaviour is right; the animation had a bug
+
+The author's report of the animated run: *it looked as though the pointer moved
+between displays in the ideal way, and that although it caught at the corner,
+it slid in and crossed onto the neighbouring display.*
+
+### What that establishes
+
+- The pointer **slides along the edge and crosses**, rather than jumping
+  straight across or landing somewhere arbitrary. That is the semantic the
+  Goal section demands, and it is now an observation rather than a
+  calculation.
+- It does **not** land in the middle of a display. That failure would have
+  been unmistakable and was not reported.
+- Combined with the earlier reach test, the whole write path is confirmed on
+  hardware: a virtual absolute pointer can put the cursor at a chosen point on
+  any display, and the chosen points are the right ones.
+
+**What remains is detection.** Nothing about moving the pointer is still in
+question.
+
+### "Caught at the corner" was a real defect, and it was mine
+
+Two readings were possible: the demonstration deliberately stops the pointer at
+the dead edge before redirecting, so "caught" may simply describe that. But the
+pacing was also wrong, and the arithmetic says so without needing to ask.
+
+The demonstration gave the crossing 30% of the animation. A crossing is three
+pixels wide. Measured against the author's layout, where 65536 raw units span
+6840px (9.58 raw units per pixel):
+
+```
+slide  258px over 2.10s  ->  206 distinct screen pixels, one step every  10ms
+cross    3px over 0.90s  ->    4 distinct screen pixels, one step every 300ms
+```
+
+Of the 108 events sent during the crossing, 72% carried a raw value identical
+to the previous one and were dropped by the kernel. A screen has no pixels
+between pixels: **stretching a short move does not smooth it, it stutters it.**
+One step every 300ms is precisely what "catching" looks like.
+
+Fixed by pacing the crossing against what a screen can show rather than as a
+share of the time — `max_legible_duration()` in `src/wcs/motion.py`, with a
+floor of 20 visible steps per second. The time goes to the slide, a 0.4s still
+hold marks the corner as a deliberate beat, and the crossing is drawn in 0.15s
+(50ms per visible step).
+
+**The general lesson, worth keeping:** any animation here is quantised twice —
+once by the axis resolution and once by the screen. Before choosing a duration,
+ask how many distinct positions the move can actually display. `258px` can fill
+thirteen seconds; `3px` cannot fill one.
+
+### The prompts never appeared, and the stepping never happened
+
+The run logged `(no /dev/tty; falling back to timed steps)`, so the
+demonstration played straight through at a fixed pace and the author could not
+control it. The fallback worked as designed, but the cause matters: the process
+had no controlling terminal. `Console` now tries `sys.stdin` when `/dev/tty`
+cannot be opened, which covers a launcher that detaches the tty but leaves
+stdin attached.
