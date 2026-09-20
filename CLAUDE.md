@@ -16,10 +16,23 @@ actually available.
 
 ## Goal
 
-On KDE Plasma / Wayland with a non-rectangular multi-display layout, let the
-pointer cross the "dead corners" where a display edge blocks it, instead of
-getting stuck. Comparable to Windows 11's *Ease cursor movement between
-displays*. See `README.md` and `img/motivation.png`.
+Reproduce Windows 11's *Ease cursor movement between displays* on KDE Plasma /
+Wayland, for a non-rectangular multi-display layout. See `README.md` and
+`img/motivation.png`.
+
+**The required semantics are specific, and getting them wrong makes the result
+useless:**
+
+- When the pointer reaches a stretch of a display edge that no neighbouring
+  display covers, it must be moved onto the adjacent display **preserving its
+  position along that edge** — it lands at the nearest valid point, so the
+  motion reads as a slide.
+- **It must never be warped to the centre of the target display**, or to any
+  other fixed landmark. A jump to a fixed point destroys the continuity that is
+  the entire purpose of the feature, and would be worse than the problem.
+
+This is redirection, not the removal of resistance. See the terminology trap
+below.
 
 ## Verified platform constraints
 
@@ -216,6 +229,63 @@ What the settings actually buy:
 Worth setting, free, zero risk, but **not a solution and not a prerequisite.**
 Do not present it as one.
 
+### The coordinate-space question — resolved, and favourably
+
+**The author's hypothesis, recorded as stated:** on Wayland, the cursor
+coordinates that can be read or written in a multi-display setup are relative to
+a single display — the one owning the foreground window — rather than to the
+whole desktop. Evidence offered: memory of the earlier attempt, and the
+observed behaviour of an XP-Pen tablet, which stays confined to one display.
+This was expected to be the project's main obstacle.
+
+**The observation is real, but it is two separate phenomena, and neither blocks
+this project.**
+
+*For Wayland clients, the hypothesis is correct.* A client receives only
+surface-local pointer coordinates and has no protocol-level way to learn the
+global cursor position. This is by design. It is precisely why the read side
+must not be a Wayland client — a KWin script runs inside the compositor, and
+`workspace.cursorPos` is layout-global.
+
+*The XP-Pen behaviour is a different mechanism: device-to-output mapping.*
+`src/backends/libinput/connection.cpp` treats absolute device classes
+differently:
+
+```cpp
+case LIBINPUT_EVENT_POINTER_MOTION_ABSOLUTE: {
+    Q_EMIT pe->device()->pointerMotionAbsolute(
+        pe->absolutePos(workspace()->geometry().size()), pe->time(), pe->device());
+```
+
+```cpp
+// touch, by contrast, is resolved against one specific output
+const QPointF globalPos = devicePointToGlobalPosition(te->absolutePos(output->modeSize()), output);
+```
+
+An absolute **pointer** event is scaled against `workspace()->geometry()` — the
+bounding box of the entire layout. Only touch and tablet devices are bound to a
+single output (see the `deviceOutput` resolution later in the same file, which
+honours `device->outputName()` and falls back to a single output for touch).
+
+**Consequences:**
+
+- A tablet is confined to one display because it is a tablet, not because
+  Wayland coordinates are per-display. The XP-Pen is not evidence of a
+  coordinate-space limit.
+- A uinput device that libinput classifies as an **absolute pointer** addresses
+  the whole desktop. Getting that classification is the engineering requirement:
+  `ABS_X`/`ABS_Y` plus `BTN_LEFT`, and it must **not** look like a touchscreen
+  (`INPUT_PROP_DIRECT`) or a tablet (`BTN_TOOL_PEN`), or it will be mapped to a
+  single output and the approach collapses.
+- Since the scale target is read per event, a layout change needs no device
+  re-creation.
+- The bounding box includes dead area in a non-rectangular layout. That is
+  harmless: `updatePosition()` resolves `outputAt(pos)` and confines to that
+  output, so any target inside a real output is honoured.
+
+This significantly raises confidence in the uinput approach below. It remains
+untested on real hardware.
+
 ### Absolute motion bypasses the edge barrier — possible Python write path
 
 `PointerInputRedirection::applyEdgeBarrier()` opens with:
@@ -244,12 +314,19 @@ write path that satisfies every constraint: **Python (`python-evdev`), outside
 the compositor, so a bug cannot take down KWin**, with no portal and no
 notification.
 
-**Status: promising but unverified.** The open risk is that libinput classifies
-an absolute-positioning uinput device as a tablet or touchscreen and maps it to
-a single output, in which case KWin routes it through `tablet_input` /
-`touch_input` rather than `PointerInputRedirection`. This has to be settled on
-real hardware before anything is built on it. Setup also requires access to
-`/dev/uinput` (an `input` group membership or a udev rule).
+**Status: promising but untested on hardware.** The risk is now understood
+precisely rather than vaguely — see "The coordinate-space question" above. It is
+not that absolute coordinates are per-display; it is that libinput must classify
+the device as an absolute *pointer*. If it is tagged as a touchscreen or tablet
+instead, KWin binds it to one output and routes it through `touch_input` /
+`tablet_input`, and the approach collapses. The XP-Pen's single-display
+behaviour is exactly this failure mode in the wild.
+
+Device definition therefore matters more than the event loop: `ABS_X`/`ABS_Y`
+plus `BTN_LEFT`, no `INPUT_PROP_DIRECT`, no `BTN_TOOL_PEN`. Verify the
+classification (`libinput list-devices`) before writing any movement logic.
+Setup also requires access to `/dev/uinput` (an `input` group membership or a
+udev rule).
 
 If this holds, the read half can be a QML KWin script feeding positions over
 D-Bus, as originally sketched — see below.
@@ -314,9 +391,14 @@ session. Decision 4 rules that out. Do not propose it again.
   across compositors; do not assume scale factors are uniform.
 - The `kwinrc` barrier settings are worth applying for comfort, but they do not
   address the dead bands. Do not treat them as a gating step.
-- Settle the uinput question first. Whether libinput
-  presents a virtual absolute-positioning device as a pointer or as a
-  tablet/touchscreen decides whether a Python implementation is possible at all.
+- Settle the uinput question first, and settle it in one step: create the
+  virtual device and confirm with `libinput list-devices` that it is classified
+  as a pointer, not a tablet or touchscreen. That single check decides whether a
+  Python implementation is possible at all. Do not build movement logic before
+  it passes.
+- Then verify the landing semantics, not merely that the pointer moves. A jump
+  to the centre of the target display is a failure, not a partial success — see
+  "Goal".
 - Keep anything that could crash out of the compositor process. This is a hard
   constraint, not a preference.
 
