@@ -103,3 +103,56 @@ class ParseSpecTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RealHardwareTest(unittest.TestCase):
+    """The author's actual layout, captured on Plasma 6.3.6 on 2026-09-20.
+
+    The synthetic sample above was written from an understanding of the
+    format; this one is what kscreen-doctor really printed, tab-before-escape
+    inconsistencies and all.  It is the regression test for "the geometry we
+    compute matches the desk".
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        fixture = Path(__file__).parent / "data" / "kscreen-doctor-plasma-6.3.6.txt"
+        cls.layout = parse_kscreen_doctor(fixture.read_text())
+
+    def test_the_three_displays_are_read_correctly(self):
+        self.assertEqual(
+            {o.name: o.rect for o in self.layout.outputs},
+            {
+                "DP-1": Rect(5760, 92, 1080, 1920),   # portrait, rotation 2
+                "DP-3": Rect(0, 512, 1920, 1080),
+                "DP-4": Rect(1920, 0, 3840, 2160),
+            },
+        )
+
+    def test_the_bounding_box_starts_at_the_origin(self):
+        # KWin scales absolute events against the workspace *size*, so a
+        # non-zero origin would need subtracting. KScreen normalises the
+        # layout, so it does not arise here -- pinned so that a future
+        # rearrangement that breaks the assumption is noticed.
+        self.assertEqual(self.layout.bounding_box, Rect(0, 0, 6840, 2160))
+
+    def test_the_computed_dead_bands_are_the_ones_on_the_desk(self):
+        found = [
+            (b.output, b.direction.value, b.start, b.end)
+            for d in (Direction.LEFT, Direction.RIGHT)
+            for b in dead_bands(self.layout, d, min_length=2)
+            if b.output == "DP-4"
+        ]
+        self.assertEqual(
+            found,
+            [
+                # The three stretches marked in img/motivation.png ...
+                ("DP-4", "left", 0, 512),
+                ("DP-4", "left", 1592, 2160),
+                # ... plus one that is not marked there but is real: the
+                # portrait display starts 92px below the 4K display's top
+                # edge, so that strip has nothing behind it either.
+                ("DP-4", "right", 0, 92),
+                ("DP-4", "right", 2012, 2160),
+            ],
+        )

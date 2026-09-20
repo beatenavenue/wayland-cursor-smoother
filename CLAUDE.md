@@ -566,3 +566,114 @@ built. If the semantics are wrong, they are wrong cheaply.
 3. Detection: the `REL_X`/`REL_Y` accumulator described above, plus whatever
    supplies the global position. A QML KWin script feed remains the candidate
    for the position half; it is still unwritten.
+
+## Probe result, 2026-09-20: the gating check PASSED
+
+First run of `tools/probe_uinput.py` on the author's machine.
+
+```
+plasmashell 6.3.6 / kwin 6.3.6, Wayland, KDE
+Debian 13, kernel 6.12.107+deb13-amd64
+/dev/uinput: mode 0666, gid 102, writable
+
+sysname     : input44
+event node  : event258
+udev tags   : ID_INPUT=1
+              ID_INPUT_MOUSE=1
+VERDICT     : PASS -- classified as a pointer (nothing else)
+```
+
+**The project's central risk is retired.** A uinput device declaring `ABS_X`,
+`ABS_Y` and `BTN_LEFT`, with no `INPUT_PROP_DIRECT`, no `BTN_TOOL_PEN` and no
+`BTN_TOUCH`, is tagged `ID_INPUT_MOUSE` and nothing else — so it takes the
+absolute *pointer* path, is scaled against the whole workspace, and is not
+bound to one output. The systemd `input_id` reading recorded above holds on
+the installed version.
+
+Outstanding, minor: `libinput list-devices` could not confirm this directly,
+because it needs read access to `/dev/input/event*` and the author is not in
+the `input` group (see the correction below). The udev tags are what libinput
+itself consults, so this is a missing confirmation rather than a missing fact.
+`sudo libinput list-devices | grep -A5 wayland-cursor-smoother` would close it
+while the probe is running.
+
+### The real layout, and two assumptions it settles
+
+```
+DP-1  1080x1920 at (5760,92)   portrait (rotation 2)
+DP-3  1920x1080 at (0,512)
+DP-4  3840x2160 at (1920,0)
+bounding box 6840x2160 at (0,0)
+```
+
+Captured verbatim at `tests/data/kscreen-doctor-plasma-6.3.6.txt` and pinned
+by `tests/test_layout.py`, so the parser is now tested against real output
+rather than an imagined format.
+
+- **Open question 2 is closed.** The bounding box origin is (0,0), so nothing
+  needs subtracting from the axis mapping. A test pins it, so a future
+  rearrangement that breaks the assumption will be noticed rather than
+  presenting as a constant offset.
+- **The mixed-DPI hazard does not currently apply.** Every output reports
+  `Scale: 1`, including the 3840x2160 one, so logical and physical pixels
+  coincide today. This is a property of the current configuration, not of the
+  design; changing the 4K display's scale would reintroduce it.
+
+### There is a fourth dead band, and it is real
+
+The computed bands for DP-4 are:
+
+```
+push left   y    0.. 511  (512px)  -> DP-3
+push left   y 1592..2159  (568px)  -> DP-3
+push right  y    0..  91  ( 92px)  -> DP-1
+push right  y 2012..2159  (148px)  -> DP-1
+```
+
+`img/motivation.png` marks three of these. The fourth — DP-4's right edge
+above the portrait display's top edge — is only 92px tall, which is presumably
+why it was never noticed, but it is the same defect. Worth knowing before
+someone reads the mismatch between the image and the tool as a bug in the
+tool.
+
+### Correction, 2026-09-20: reading the physical mouse is NOT free
+
+The session record above claims the `REL_X`/`REL_Y` detector "costs nothing
+extra", reasoning that `/dev/uinput` access implies `input` group membership
+which implies read access to `/dev/input/event*`. **The premise is false on
+this machine.**
+
+`/dev/uinput` here is mode `0666` — world-writable — so the write side needs
+no group membership at all, and the author's groups are:
+
+```
+meatball dialout cdrom floppy sudo audio dip video plugdev users kvm netdev libvirt
+```
+
+No `input`. So the write half works today and the read half does not, and the
+two permissions are independent rather than implied. `sudo usermod -aG input
+$USER` plus a re-login would grant it — the author has sudo — but that is a
+decision about widening access to every input device on the system, including
+the keyboard, and it should be made deliberately rather than assumed.
+
+**Do not design the detector around evdev access until this is answered.**
+
+### Still unknown: what the demonstration actually looked like
+
+The probe emitted the reach test and the landing test, and its log shows the
+events it wrote:
+
+```
+-> centre of DP-1: (6300,1052)  raw (60362, 31918)
+-> centre of DP-3: (960,1052)   raw (9198, 31918)
+-> centre of DP-4: (3840,1080)  raw (36792, 32768)
+DP-4 push left,  band    0.. 511: (1920,256)  -> (1917,514)  on DP-3
+DP-4 push left,  band 1592..2159: (1920,1876) -> (1917,1589) on DP-3
+DP-4 push right, band    0..  91: (5759,46)   -> (5762,94)   on DP-1
+DP-4 push right, band 2012..2159: (5759,2086) -> (5762,2009) on DP-1
+```
+
+A log cannot say whether the pointer moved, or where it landed. Until the
+author reports what was on screen, "the warp works" and "the landing semantics
+are right" are both unconfirmed — the classification PASS above says only that
+the events were accepted onto the pointer path.

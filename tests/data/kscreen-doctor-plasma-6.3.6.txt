@@ -1,0 +1,45 @@
+[01;32mOutput: [0;0m1 DP-1
+	[01;32menabled[0;0m
+	[01;32mconnected[0;0m
+	[01;32mpriority 3[0;0m
+	[01;33mDisplayPort[0;0m
+	[01;34mModes: [0;0m 1:1920x1080@60!  2:[01;32m1920x1080@180*[0;0m  3:1920x1080@144  41:720x400@70 
+[01;33m	Geometry: [0;0m5760,92 1080x1920
+[01;33m	Scale: [0;0m1
+[01;33m	Rotation: [0;0m2
+[01;33m	Overscan: [0;0m0
+[01;33m	Vrr: [0;0mNever
+[01;33m	RgbRange: [0;0mAutomatic
+[01;33m	HDR: [0;0mdisabled
+[01;33m	Wide Color Gamut: [0;0mdisabled
+[01;33m	ICC profile: [0;0mnone
+[01;33m	Color profile source: [0;0msRGB
+[01;33m	Color power preference: [0;0mprefer efficiency and performance
+[01;33m	Brightness control: [0;0msupported, set to 100% and dimming to 100%
+[01;32mOutput: [0;0m2 DP-3
+	[01;32menabled[0;0m
+	[01;32mconnected[0;0m
+	[01;32mpriority 1[0;0m
+	[01;33mDisplayPort[0;0m
+	[01;34mModes: [0;0m 42:[01;32m1920x1080@60*[0;0m!  43:1920x1080@60  69:720x400@70 
+[01;33m	Geometry: [0;0m0,512 1920x1080
+[01;33m	Scale: [0;0m1
+[01;33m	Rotation: [0;0m1
+[01;33m	Overscan: [0;0m0
+[01;33m	Vrr: [0;0mincapable
+[01;33m	RgbRange: [0;0mAutomatic
+[01;33m	HDR: [0;0mincapable
+[01;33m	Brightness control: [0;0msupported, set to 100% and dimming to 100%
+[01;32mOutput: [0;0m3 DP-4
+	[01;32menabled[0;0m
+	[01;32mconnected[0;0m
+	[01;32mpriority 2[0;0m
+	[01;33mDisplayPort[0;0m
+	[01;34mModes: [0;0m 70:[01;32m3840x2160@60*[0;0m!  71:3840x2160@50  90:640x480@60 
+[01;33m	Geometry: [0;0m1920,0 3840x2160
+[01;33m	Scale: [0;0m1
+[01;33m	Rotation: [0;0m1
+[01;33m	Overscan: [0;0m0
+[01;33m	Vrr: [0;0mincapable
+[01;33m	HDR: [0;0mdisabled
+[01;33m	Brightness control: [0;0munsupported
