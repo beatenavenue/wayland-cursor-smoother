@@ -137,6 +137,7 @@ class VirtualPointer:
         self._product = product
         self._version = version
         self._fd: Optional[int] = None
+        self._last_raw: Optional[tuple[int, int]] = None
         self.sysname: Optional[str] = None
 
     # -- lifecycle ---------------------------------------------------------
@@ -235,14 +236,36 @@ class VirtualPointer:
     def move_raw(self, raw_x: int, raw_y: int) -> None:
         """Place the pointer using raw axis values.
 
-        The kernel drops an absolute event that repeats the current value, so
-        a caller that needs the pointer *put back* where it already is has to
-        nudge it first.  Callers that only ever warp to a new place -- which
-        is this project's entire use -- need not care.
+        The kernel drops an absolute event whose value repeats this device's
+        current one, so a repeated position is silently no motion at all. An
+        earlier version of this docstring waved that away -- "callers that
+        only ever warp to a new place, which is this project's entire use" --
+        and **that was wrong**, in a way that took a user report to see.
+
+        Two facts recorded separately contradict each other. Within one dead
+        band every redirect lands on the *same* corner of the neighbour,
+        because that is the nearest valid point from anywhere in the band.
+        So the second redirect out of a band asks for the exact position the
+        first one already set, and nothing happens. A different band works,
+        which is precisely what "the same edge stops working, another edge is
+        fine" looks like from the outside.
+
+        It is more general than repeated redirects: the physical pointer
+        moves the cursor without touching this device's axes, so *any* request
+        for the position we last emitted is dropped, however long ago it was.
+
+        So a repeat is preceded by a one-unit nudge in its own report. One
+        raw unit is about a tenth of a pixel on a desktop this size -- below
+        anything visible -- and the position that lands is exact.
         """
+        if self._last_raw == (raw_x, raw_y):
+            nudge = raw_x - 1 if raw_x > 0 else raw_x + 1
+            self._emit(EV_ABS, ABS_X, nudge)
+            self._emit(EV_SYN, SYN_REPORT, 0)
         self._emit(EV_ABS, ABS_X, raw_x)
         self._emit(EV_ABS, ABS_Y, raw_y)
         self._emit(EV_SYN, SYN_REPORT, 0)
+        self._last_raw = (raw_x, raw_y)
 
     def move_to(self, mapping: AxisMapping, x: float, y: float) -> tuple[int, int]:
         raw = mapping.raw(x, y)

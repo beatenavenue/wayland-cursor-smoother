@@ -16,6 +16,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wcs.uinput import (  # noqa: E402
     ABS_MAX,
+    VirtualPointer,
     AxisMapping,
     UinputError,
     _INPUT_EVENT,
@@ -91,3 +92,87 @@ class AxisMappingTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RepeatedPositionTest(unittest.TestCase):
+    """The kernel drops an absolute value that repeats this device's own.
+
+    Found on hardware, reported as "crossing the same edge twice stops
+    working, another edge is fine". Within one dead band every redirect lands
+    on the same corner of the neighbour -- that is the nearest valid point
+    from anywhere in the band, and is correct -- so the second redirect asks
+    for exactly the position the first one set, and the kernel discards it.
+    Nothing moves, and the log still says a redirect happened.
+
+    A glide hides it, because its intermediate positions differ; a warp does
+    not, because it has none.
+    """
+
+    def emitted(self, moves):
+        """Run ``moves`` through a real fd and decode what came out."""
+        import os
+        read_fd, write_fd = os.pipe()
+        pointer = VirtualPointer()
+        pointer._fd = write_fd
+        try:
+            for raw_x, raw_y in moves:
+                pointer.move_raw(raw_x, raw_y)
+        finally:
+            os.close(write_fd)
+        blob = b""
+        while True:
+            chunk = os.read(read_fd, 4096)
+            if not chunk:
+                break
+            blob += chunk
+        os.close(read_fd)
+        count = len(blob) // _INPUT_EVENT.size
+        return [_INPUT_EVENT.unpack_from(blob, i * _INPUT_EVENT.size)[2:]
+                for i in range(count)]
+
+    def test_a_first_move_is_one_plain_report(self):
+        self.assertEqual(
+            self.emitted([(1000, 2000)]),
+            [(0x03, 0x00, 1000), (0x03, 0x01, 2000), (0x00, 0x00, 0)],
+        )
+
+    def test_a_repeat_is_preceded_by_a_nudge_in_its_own_report(self):
+        events = self.emitted([(1000, 2000), (1000, 2000)])
+        self.assertEqual(events[3:], [
+            (0x03, 0x00, 999), (0x00, 0x00, 0),          # nudge, committed
+            (0x03, 0x00, 1000), (0x03, 0x01, 2000), (0x00, 0x00, 0),
+        ])
+
+    def test_the_nudge_is_below_a_tenth_of_a_pixel(self):
+        # One raw unit over a 6840px layout. Invisible, which is the point.
+        mapping = AxisMapping(0, 0, 6840, 2160)
+        self.assertLess(libinput_transform(1, 6840), 0.11)
+        self.assertEqual(mapping.raw(0, 0), (0, 0))  # and it stays in range
+
+    def test_a_different_position_needs_no_nudge(self):
+        events = self.emitted([(1000, 2000), (1500, 2000)])
+        self.assertEqual(len(events), 6)
+        self.assertNotIn(999, [value for _, _, value in events])
+
+    def test_the_nudge_goes_up_when_the_axis_is_already_at_zero(self):
+        events = self.emitted([(0, 0), (0, 0)])
+        self.assertEqual(events[3], (0x03, 0x00, 1))
+
+    def test_the_position_that_lands_is_always_the_one_asked_for(self):
+        for moves in ([(5, 7)], [(5, 7), (5, 7)], [(5, 7), (5, 7), (5, 7)]):
+            events = self.emitted(moves)
+            axes = {code: value for etype, code, value in events if etype == 0x03}
+            self.assertEqual((axes[0x00], axes[0x01]), (5, 7), moves)
+
+    def test_every_report_ends_with_a_sync(self):
+        events = self.emitted([(1000, 2000), (1000, 2000), (3, 4)])
+        self.assertEqual(events[-1][0], 0x00)
+        syncs = sum(1 for etype, _, _ in events if etype == 0x00)
+        self.assertEqual(syncs, 4)  # three moves plus one nudge
+
+    def test_a_repeat_after_an_unrelated_move_still_nudges(self):
+        # The physical pointer moves the cursor without touching this
+        # device's axes, so "we last emitted this" is the only thing that
+        # matters, however long ago it was.
+        events = self.emitted([(10, 10), (20, 20), (20, 20)])
+        self.assertIn((0x03, 0x00, 19), events)

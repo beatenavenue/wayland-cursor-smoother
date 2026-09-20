@@ -1289,3 +1289,62 @@ The `try`/`catch` around `callDBus` was added in the same change. Until it
 existed, a call that threw and a call that was never reached looked the same.
 It did not fire this time, and that silence was itself the evidence that
 narrowed the search.
+
+## The same edge twice, 2026-09-21: two correct notes that contradicted each other
+
+Reported from real use: crossing a dead edge works once, then the *same* edge
+stops firing, while a different edge is fine. The log named it without being
+asked to:
+
+```
+redirect 31: (1920,2141) -> (1917,1589)
+redirect 32: (1920,2141) -> (1917,1589)
+redirect 33: (1920,2141) -> (1917,1589)
+```
+
+The *source* position is identical across consecutive redirects. The feed only
+reports when `cursorPosChanged` fires, so an unchanged source means the pointer
+never moved — the redirect was computed, logged, and had no effect.
+
+### The cause is two things recorded separately and never put together
+
+From `src/wcs/uinput.py`:
+
+> The kernel drops an absolute event that repeats the current value... Callers
+> that only ever warp to a new place — **which is this project's entire use** —
+> need not care.
+
+From the landing-test record, higher up this file:
+
+> Within a dead band, *every* position's nearest valid point is that corner...
+> There is nowhere else for it to be.
+
+Both are true. Together they say the second redirect out of a band asks for
+precisely the position the first one set, and the kernel discards it. The
+clause in bold was simply wrong, and nothing in the code or the tests could
+notice, because both statements were correct in isolation.
+
+It is more general than repeated redirects, too. The physical pointer moves
+the cursor without touching the virtual device's axes, so **any** request for
+the position that device last emitted is dropped, however long ago.
+
+### Why a glide hid it and a warp did not
+
+A glide emits intermediate positions, which differ, so the pointer travels and
+only the final event is at risk. A warp has no intermediate positions at all,
+so it is one duplicate event and nothing happens. The bug was therefore
+invisible until the author switched to `--style warp` while tuning — and
+invisible again to anyone who only ever glides.
+
+### The fix, and how it is tested without /dev/uinput
+
+`move_raw` remembers the last raw pair and, when asked to repeat it, emits a
+one-unit nudge in its own report first. One raw unit is about a tenth of a
+pixel across a 6840px layout — below anything visible — and the position that
+finally lands is exact.
+
+`tests/test_uinput.py` writes the event stream down a real pipe and decodes
+it, so the emitted reports are checked byte for byte with no device present:
+that a first move is one plain report, that a repeat is preceded by a nudge,
+that the nudge goes up rather than down at axis zero, and that the position
+which lands is always the one asked for.
