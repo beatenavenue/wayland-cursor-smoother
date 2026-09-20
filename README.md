@@ -153,6 +153,51 @@ runs it unattended.
 Writing to `/dev/uinput` requires membership of the group that owns it, which
 is `input` on most distributions.
 
+### Reading the pointer's device without reading the keyboard
+
+Detecting that the pointer is being pushed against an edge means reading that
+device's own motion events, which needs read access to its `/dev/input/event*`
+node.
+
+The usual advice is to join the `input` group. That grants read access to
+**every** input device, the keyboard included, to anything running as you, so
+it is worth avoiding if you can.
+
+A udev rule can be narrower, but the obvious narrow rule is the wrong one.
+Matching `ATTRS{idVendor}`/`ATTRS{idProduct}` looks precise and is not: those
+attributes belong to the USB device, and a keyboard with an integrated
+TrackPoint or trackpad presents its keyboard and its pointer as two interfaces
+of one device sharing them. Such a rule hands over the keystrokes it was
+written to protect.
+
+Matching what udev has already classified the device as avoids that, and
+survives replacing the mouse:
+
+```
+ENV{ID_INPUT_KEYBOARD}=="1", GOTO="wcs_end"     # refuse first, always
+ENV{ID_INPUT_MOUSE}=="1",         TAG+="uaccess"
+ENV{ID_INPUT_POINTINGSTICK}=="1", TAG+="uaccess"
+ENV{ID_INPUT_TOUCHPAD}=="1",      TAG+="uaccess"
+```
+
+`TAG+="uaccess"` grants an ACL to whoever holds the active local session
+rather than to a group, so it does not reach remote or inactive users.
+
+```console
+$ python3 tools/probe_evdev_access.py              # what is readable now
+$ python3 tools/probe_evdev_access.py --write-rule # the rule, and how to install it
+$ python3 tools/probe_evdev_access.py --watch 20   # which devices actually reach you
+```
+
+The probe checks two things, and the second is the one that matters: some
+pointing device must be readable, and **no keyboard may be**. A rule that is
+too wide still makes the feature work, which is exactly why it needs checking
+separately.
+
+One case no rule can fix: if a pointing device shares a single event node with
+a keyboard, reading its motion means reading its keystrokes. The probe names
+such nodes instead of quietly skipping them.
+
 ### Tests
 
 ```console
