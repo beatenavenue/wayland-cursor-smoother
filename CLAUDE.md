@@ -4,15 +4,19 @@ Guidance for Claude Code (and humans) working in this repository.
 
 ## Project status
 
-**Nothing is implemented.** The repository contains a README, a LICENSE and one
-image. As of this writing there are three commits, all from 2025-11, and the
-`work/feed` branch points at the same commit as `main` — it was created but
-never used.
+**Nothing is implemented.** The repository contains documentation only: this
+file, `README.md`, a LICENSE and one image. No source file has ever existed
+here. The `work/feed` branch was created but never used and points at the same
+commit as `main`.
 
 An earlier attempt (done with a different assistant) stalled before it could
-even read the pointer position, and the project has been frozen since. The
-research below explains why that attempt could not have succeeded, and what is
-actually available.
+even read the pointer position, and the project was frozen from 2025-11 until
+the research recorded here was carried out on 2026-09-20. That research explains
+why the earlier attempt could not have succeeded, and what is actually
+available.
+
+Nothing below has been tested on the author's hardware. It is all derived from
+reading upstream source.
 
 ## Goal
 
