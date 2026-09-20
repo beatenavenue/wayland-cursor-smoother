@@ -1,0 +1,9 @@
+{
+  "KPackageStructure": "KWin/Script",
+  "KPlugin": {
+    "Name": "Cursor Feed",
+    "Description": "Send cursor positions via DBus",
+    "Version": "1.0",
+    "EnabledByDefault": true
+  }
+}

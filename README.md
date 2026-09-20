@@ -17,3 +17,21 @@ This project uses two components:
 - A Python helper, **glide_cursor**, which consumes those positions and, when the pointer is blocked by a display edge, “slides” it onto the adjacent screen.
 
 To the best of my knowledge there is currently no easy way to implement the same approach on GNOME. This is KDE/Wayland-only.
+
+## Setup
+### Cursor Feed
+KWin scripts put in to directory.
+
+- ~/.local/share/kwin/scripts/cursor-feed/metadata.json
+- ~/.local/share/kwin/scripts/cursor-feed/contents/code/main.js
+
+and Enable "Cursor Feed" at `System Setting > Window Management > KWin Script` menu.  
+(Maybe required system reboot)
+
+### glide_daemon
+install dependency
+```bash
+sudo apt install -y python3-gi gir1.2-glib-2.0 python3-pydbus
+````
+
+TBD
