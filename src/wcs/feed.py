@@ -109,13 +109,31 @@ def bands_as_json(bands: Iterable[WatchBand]) -> str:
 
 
 def feed_script(bands: Sequence[WatchBand], *, bus_name: str, object_path: str,
-                interface: str, marker: str = "wcs") -> str:
+                interface: str, marker: str = "wcs", trace: bool = False) -> str:
     """The KWin JS script that reports when the pointer is on a watch strip.
 
     It calls ``Edge(index, x, y)`` on entering a strip, on every motion while
     inside one, and once with ``-1`` on leaving. Outside every strip it is
     silent, which is nearly all of the time.
+
+    ``trace`` makes it say what it sees -- the position it read and the band
+    it computed -- to the compositor's journal. Written because the first run
+    produced a script that loaded, ran, logged no error and called nothing,
+    which is a silence no amount of reading the code resolves: either the
+    rectangle test disagrees with the position, or the call fails. Tracing
+    asks the script instead of guessing.
+
+    The call is wrapped in a try/catch in both modes. A `callDBus` that
+    throws was, until this was written, indistinguishable from one that was
+    never reached.
     """
+    trace_line = (
+        "    ticks += 1;\n"
+        "    if (band >= 0 || ticks % 25 === 0) {\n"
+        "        print(__MARK__ + ' sees ' + p.x + ',' + p.y + ' -> band ' + band);\n"
+        "    }\n"
+        if trace else ""
+    )
     return (
         "// wayland-cursor-smoother feed -- generated; edits will be overwritten.\n"
         "//\n"
@@ -138,20 +156,29 @@ def feed_script(bands: Sequence[WatchBand], *, bus_name: str, object_path: str,
         "    return -1;\n"
         "}\n"
         "\n"
+        "var ticks = 0;\n"
+        "\n"
         "function onMoved() {\n"
         "    var p = workspace.cursorPos;\n"
         "    var band = bandAt(p);\n"
+        "__TRACE__"
         "    if (band < 0 && current < 0) {\n"
         "        return;  // the common case: nowhere near an edge, say nothing\n"
         "    }\n"
         "    current = band;\n"
-        "    callDBus(__SERVICE__, __OBJECT__, __IFACE__, 'Edge', band, p.x, p.y);\n"
+        "    try {\n"
+        "        callDBus(__SERVICE__, __OBJECT__, __IFACE__,\n"
+        "                 'Edge', band, p.x, p.y);\n"
+        "    } catch (e) {\n"
+        "        print(__MARK__ + ' callDBus threw: ' + e);\n"
+        "    }\n"
         "}\n"
         "\n"
         "workspace.cursorPosChanged.connect(onMoved);\n"
         "print(__MARK__ + ' feed watching ' + BANDS.length + ' band(s)');\n"
         "onMoved();\n"
-    ).replace("__BANDS__", bands_as_json(bands)) \
+    ).replace("__TRACE__", trace_line) \
+     .replace("__BANDS__", bands_as_json(bands)) \
      .replace("__SERVICE__", json.dumps(bus_name)) \
      .replace("__OBJECT__", json.dumps(object_path)) \
      .replace("__IFACE__", json.dumps(interface)) \

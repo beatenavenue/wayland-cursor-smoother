@@ -117,7 +117,8 @@ class ScriptTest(unittest.TestCase):
             self.assertIn(piece, self.SCRIPT)
 
     def test_it_reports_through_one_method(self):
-        self.assertEqual(self.SCRIPT.count("callDBus"), 1)
+        # Count call sites, not the word: the error message mentions it too.
+        self.assertEqual(self.SCRIPT.count("callDBus("), 1)
         self.assertIn("'Edge'", self.SCRIPT)
 
     def test_it_stays_silent_away_from_every_strip(self):
@@ -138,3 +139,41 @@ class ScriptTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class TraceScriptTest(unittest.TestCase):
+    """The tracing variant exists because a silence had to be broken open.
+
+    The first daemon run loaded a script that ran, logged nothing and called
+    nothing. Reading the code cannot distinguish "the rectangle test never
+    matched" from "the call failed", so the script says what it sees.
+    """
+
+    BANDS = watch_bands(REAL)
+
+    def script(self, **kwargs):
+        return feed_script(self.BANDS, bus_name="a.b.C", object_path="/a/b/C",
+                           interface="a.b.C.Feed", marker="mark", **kwargs)
+
+    def test_tracing_reports_the_position_and_the_computed_band(self):
+        script = self.script(trace=True)
+        self.assertIn("' sees ' + p.x + ',' + p.y + ' -> band ' + band", script)
+
+    def test_tracing_is_off_by_default(self):
+        self.assertNotIn(" sees ", self.script())
+
+    def test_a_failing_call_is_reported_in_both_modes(self):
+        # Until this existed, a callDBus that threw looked exactly like one
+        # that was never reached.
+        for script in (self.script(), self.script(trace=True)):
+            self.assertIn("catch (e)", script)
+            self.assertIn("callDBus threw", script)
+
+    def test_both_modes_stay_syntactically_balanced(self):
+        for script in (self.script(), self.script(trace=True)):
+            self.assertEqual(script.count("{"), script.count("}"))
+            self.assertEqual(script.count("("), script.count(")"))
+
+    def test_no_placeholder_survives_into_either_script(self):
+        for script in (self.script(), self.script(trace=True)):
+            self.assertNotIn("__", script)

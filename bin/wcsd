@@ -187,7 +187,7 @@ def diagnose(config, seconds: float) -> int:
         return 2
 
     text = feed_script(bands, bus_name=BUS_NAME, object_path=OBJECT_PATH,
-                       interface=FEED_INTERFACE, marker=FEED_MARKER)
+                       interface=FEED_INTERFACE, marker=FEED_MARKER, trace=True)
     path = Path("/tmp") / "wcs-diagnose-feed.js"
     path.write_text(text)
     try:
@@ -246,10 +246,10 @@ def diagnose(config, seconds: float) -> int:
         except (OSError, subprocess.TimeoutExpired):
             continue
         lines = [ln for ln in out.splitlines()
-                 if FEED_MARKER in ln or "js:" in ln.lower()
+                 if FEED_MARKER in ln
                  or "error" in ln.lower() or "warning" in ln.lower()]
         if lines:
-            for line in lines[:30]:
+            for line in lines[-40:]:
                 print(f"     {line}")
             break
     else:
