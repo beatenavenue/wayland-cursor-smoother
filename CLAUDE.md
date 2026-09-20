@@ -1191,3 +1191,36 @@ also means a fallback that *does* stream is affordable if one is ever wanted.
 
 What is left is code, not questions: the push detector, and the daemon that
 joins the pieces.
+
+## Settled decision 8 — the feel is configurable, 2026-09-21
+
+The author's ruling: **warp versus glide, and the push threshold, vary by
+person and must be user-settable.** Not a default with a code change behind
+it; configuration.
+
+`src/wcs/config.py`, INI at `$XDG_CONFIG_HOME/wayland-cursor-smoother.conf`,
+the same shape as the `kwinrc` a KDE user already edits. Command line flags
+override the file; the file overrides the defaults.
+
+Two properties are pinned by tests rather than left to discipline:
+
+- **The shipped default file parses to exactly `Config()`.** Otherwise
+  someone who copies the documented file gets different behaviour from
+  someone who has no file at all, and neither can tell why.
+- **Every field of every settings dataclass is mentioned in that file.** A
+  setting that exists but is not documented is one nobody will find.
+
+### Validation is strict on purpose
+
+An unknown key is an error, an unknown section is an error, and so is a value
+outside the range that makes sense. The failure being avoided is specific: a
+mistyped `threshhold` that is silently ignored leaves someone changing a
+number, seeing no effect, and concluding the feature does not work. The error
+messages name the offending text and list what was expected.
+
+Three ranges are refused for reasons worth recording. A `threshold` of 0 would
+fire on the first event, which is the contact-triggered behaviour the whole
+detector exists to avoid. A `max_slide` of 0 would mean "never redirect",
+which nobody writes on purpose — "off" has its own spellings (`none`, `off`,
+`unlimited`, blank). A `duration` of 0 *is* allowed, because it is simply a
+warp, and refusing it would be pedantry.
