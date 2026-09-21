@@ -210,9 +210,31 @@ which is much faster while you are finding what you like:
 | `rate` | 120 | Positions emitted per second while gliding |
 | `inset` | 2 | Pixels inside the destination display to land. A safety margin, not a preference |
 | `max_slide` | none | Refuse to redirect when the pointer would have to slide further than this along an edge |
+| `undo_window` | 3 | Seconds a **warp** can be taken back by pushing `threshold` the other way. `off` disables it; it does nothing under `style = glide` |
+
+### Taking a warp back
+
+What you feel while using a pointer is how far your hand moved, not where the
+pointer is — the pointer is barely watched, and often lost. That is why a dead
+zone is worth fixing at all: your hand moves and the pointer is not where you
+expected it.
+
+A warp has the same problem from the other side. When it puts the pointer
+somewhere you did not ask for, your hand is holding a displacement it never
+made, and pushing back does not undo it — the way home is a detour around the
+edge the redirect slid along.
+
+So a warp stays undoable for `undo_window` seconds: **push `threshold` the
+other way and the pointer goes back exactly where it was.** The same amount of
+motion buys it and buys it back. A button press cancels the offer, because
+clicking means you meant to be there.
+
+A glide needs none of this and does not get it: it already travelled the way
+back in front of you, and retracing it costs the motion it cost to arrive.
 
 A mistyped key is an error rather than something silently ignored, so a
-setting that does nothing will tell you why.
+setting that does nothing will tell you why. `--check` also prints whether the
+undo is actually active, since `undo_window` is inert under `glide`.
 
 Changing the config needs a restart — `systemctl --user restart
 wayland-cursor-smoother` if you installed the unit above. `SIGHUP` re-reads

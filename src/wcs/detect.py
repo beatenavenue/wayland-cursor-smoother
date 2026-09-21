@@ -27,7 +27,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .geometry import Direction
+from .geometry import Direction, Point
 
 #: Outward device counts that constitute a push. KWin's own EdgeBarrier
 #: defaults to 100 (of pixels, at a different layer), and starting at the same
@@ -133,3 +133,90 @@ class PushDetector:
         if self.threshold <= 0:
             return 1.0
         return min(1.0, self._accumulated / self.threshold)
+
+
+#: Seconds a redirect stays undoable. Long enough to notice the pointer is
+#: somewhere unexpected and start pushing back, short enough that a push a
+#: minute later is a new intention rather than a correction.
+DEFAULT_UNDO_WINDOW = 3.0
+
+
+@dataclass
+class UndoLatch:
+    """Take a redirect back when the user pushes the same amount the other way.
+
+    A warp costs the user something a glide does not. What a person feels
+    continuously is how far their hand moved, not where the pointer is -- the
+    pointer is barely watched and often lost. So a warp that moves the pointer
+    somewhere unexpected leaves the hand holding a displacement it never made,
+    and the natural correction is to push back *the same amount*. Without this
+    the pointer does not come back: the way home is a detour around the edge
+    the redirect slid along.
+
+    Symmetry is the whole design. The same ``threshold`` buys the redirect and
+    buys it back, so the gesture is its own inverse, and nothing new has to be
+    learnt. The latch is armed only after a warp, because a glide has already
+    shown the way back and costs the same motion to retrace.
+    """
+
+    threshold: float = DEFAULT_THRESHOLD
+    window: float = DEFAULT_WINDOW
+    lifetime: float = DEFAULT_UNDO_WINDOW
+
+    _direction: Optional[Direction] = field(default=None, init=False)
+    _source: Optional[Point] = field(default=None, init=False)
+    _accumulated: float = field(default=0.0, init=False)
+    _last_back_at: float = field(default=float("-inf"), init=False)
+    _expires_at: float = field(default=float("-inf"), init=False)
+
+    def arm(self, source: Point, direction: Direction, now: float) -> None:
+        """A redirect just fired ``direction`` from ``source``."""
+        self._direction = direction
+        self._source = source
+        self._accumulated = 0.0
+        self._last_back_at = now
+        self._expires_at = now + self.lifetime
+
+    def disarm(self) -> None:
+        """The redirect is no longer undoable: it expired, it was taken back,
+        or the user did something that means they meant to be here."""
+        self._direction = None
+        self._source = None
+        self._accumulated = 0.0
+
+    def motion(self, dx: float, dy: float, now: float) -> Optional[Point]:
+        """Feed one motion event. Returns where to put the pointer, once.
+
+        Pushing outward again drains the accumulator rather than being
+        ignored, so a wobble on the way back does not count as progress
+        towards a correction the user is no longer making.
+        """
+        if self._direction is None:
+            return None
+        if now > self._expires_at:
+            self.disarm()
+            return None
+
+        back = -outward_component(dx, dy, self._direction)
+        if back == 0.0:
+            # Motion along the edge the redirect crossed. It says nothing
+            # about wanting to come back, and it does not keep the gesture
+            # alive either -- the same reading PushDetector gives it.
+            return None
+
+        if now - self._last_back_at > self.window:
+            self._accumulated = 0.0
+        self._last_back_at = now
+        self._accumulated = max(0.0, self._accumulated + back)
+
+        if self._accumulated < self.threshold:
+            return None
+        source = self._source
+        self.disarm()
+        return source
+
+    # -- for diagnostics ---------------------------------------------------
+
+    @property
+    def armed(self) -> bool:
+        return self._direction is not None

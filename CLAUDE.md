@@ -60,6 +60,9 @@ one of the explanations this file first offered for it was itself wrong.
 - **The feel is not settled.** The author reports it differs from Windows in
   some way not yet pinned down. `threshold`, `style` and `duration` are the
   knobs; which one is responsible has not been established.
+- **The undo has never run on hardware.** `UndoLatch` is pinned by unit
+  tests, but no warp has been taken back on the author's desk. See "Settled
+  decision 10", below.
 - **The systemd user unit has never been installed.** `wcsd --write-service`
   generates it, and its shape is pinned by tests, but no session has started
   the daemon through systemd. See "Running it with the session", below.
@@ -1710,4 +1713,120 @@ of cursor between displays based on motion vectors*, which describes choosing
 the destination display by the direction of travel. It is tempting to read it
 as Microsoft's implementation. **It is not: the assignee is Lenovo**, filed
 2022-07-26, granted 2024-10-22. Do not cite it as what Windows does.
+
+## Settled decision 10 — the user feels the hand, not the pointer (2026-09-21)
+
+The author's ruling, and it is the premise the rest of this file should have
+been reasoned from. Recorded close to verbatim, because paraphrasing it loses
+the part that matters.
+
+> As a first premise, the user **does not look at the mouse cursor much**, and
+> **frequently loses it**. People need countermeasures to find a lost cursor:
+> an eyeball widget that follows it, the Ctrl-key ripple, shaking it to make
+> it briefly huge.
+>
+> What the user feels at all times is **the amount of motion in their hand**,
+> not the pointer's position on screen. That is exactly why a dead zone —
+> where the hand moves and the pointer does not appear where it is expected —
+> is stressful, and that is this project's motivation itself.
+
+Three consequences, as the author stated them:
+
+1. **The discomfort is "having discovered the deviation, being unable to
+   return with an equal amount of motion".** It is *not* "losing sight of the
+   pointer".
+2. **No `landing` setting is needed. Only warp needs a remedy.**
+3. **Only warp needs a way back.** A glide has already returned by the same
+   amount of motion it took to slide in.
+
+### Correction, 2026-09-21: the axis is reciprocity, not information
+
+Earlier this session I argued the glide/warp split this way:
+
+> **glide is a claim about how the pointer moved** — the animation draws the
+> path, so the path must be a motion someone made. **warp is a function** —
+> no path, so all that exists is the mapping, and a mapping wants to be
+> invertible.
+
+That is not wrong as far as it goes, and it is **the wrong axis**. It treats
+the difference as *information* — the glide shows you where it went, the warp
+does not — and therefore frames the warp's problem as disorientation. The
+author's answer is that disorientation is not the complaint, because the
+pointer is barely watched in either mode. The complaint is that **the hand
+pushed one way and cannot undo it by pushing the same amount back**. A warp
+leaves the hand holding a displacement it never made.
+
+Reasoning from the screen rather than from the hand is the same mistake this
+project exists to correct, and I made it while designing the fix for it.
+
+### The reciprocal mapping is recorded, and not taken
+
+The idea that reached this decision was the author's: a dead band should map
+onto a *range* on the neighbour rather than a single point, and the range
+should map back. Worked through, the return leg forces the target to be a
+dead edge of the neighbour (nowhere else can a push be refused, so nowhere
+else can a return be triggered), which makes the mapping "unroll the corner":
+depth past the neighbour's extent becomes distance from the shared corner.
+For this desk it fits — all four reciprocal ranges land inside the neighbour,
+and the four edges they need (DP-3's top and bottom, DP-1's top and bottom)
+are walls today, so nothing existing is overridden.
+
+It is **not being implemented**, for two reasons:
+
+- under `glide` it would animate a path nobody travelled (out of the band, up
+  570px, across, then 568px back along the neighbour's bottom edge — roughly
+  double today's journey);
+- it returns the pointer to the *corresponding* point, whereas an undo
+  returns it to the *exact* point, which is what "an equal push back" means.
+
+Worth keeping because it is the right shape for a different goal: it makes the
+layout gap-free rather than making a jump reversible.
+
+## The undo, 2026-09-21: symmetry as the whole design
+
+`UndoLatch` in `src/wcs/detect.py`, wired in `daemon.py`, off in glide.
+
+**The same `threshold` buys the redirect and buys it back.** No second number:
+"an equal push the other way" is the requirement, so a separate
+`undo_threshold` would be a different feature wearing this one's name. The
+gesture is its own inverse and there is nothing new to learn.
+
+What the latch is, precisely:
+
+- armed at each warp with the source position and the push direction;
+- accumulates the *reverse* component of device motion, using the same
+  `outward_component` negated, so motion along the edge still counts for
+  nothing and a wobble outward drains it rather than being ignored;
+- fires once, warping back to the exact source, and disarms;
+- expires after `undo_window` (default 3s) — long enough to notice, short
+  enough that a push a minute later is a new intention;
+- **disarms on a button press.** Clicking means the user meant to be there,
+  and taking back a position they have already acted on would be worse than
+  not offering the undo at all.
+
+### Two things that could have gone silently wrong
+
+**A setting that does nothing.** `undo_window` is inert under `glide`, which
+is exactly the failure decision 8's validation section is about. Both
+`--check` and the daemon's startup say so in as many words —
+`undo: 3s, but INACTIVE -- it takes a warp back and style is glide` — rather
+than leaving the reader to discover it.
+
+**Spelling "off" two ways.** `--undo-window 0` and `undo_window = off` have to
+mean the same thing, so zero maps to `None` in `_validate` rather than being
+refused by the range check. This is the same trap as `--threshold 0`, which
+was once accepted on the command line while `threshold = 0` was refused.
+
+### What is not verified
+
+The unit tests pin the gesture's arithmetic and nothing else. **No warp has
+been taken back on hardware.** Two things to watch for on the first run:
+
+- the reverse push moves the pointer before it fires, because we cannot
+  consume input — so the pointer visibly travels one way and then snaps back.
+  Whether that reads as a correction or as a second surprise is a question for
+  the eye, not the tests;
+- a held TrackPoint pushed back and forth could ping-pong between a redirect
+  and its undo. The cooldown guards one direction and `undo_window` the
+  other, but the pairing has never been exercised.
 

@@ -27,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wcs.config import (
     STYLES,
+    WARP,
     ConfigError,
     config_path,
     default_config_text,
@@ -77,6 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="seconds before a part-finished push is forgotten")
     detect.add_argument("--cooldown", type=float,
                         help="seconds after a redirect before another can fire")
+    detect.add_argument("--undo-window", type=float, dest="undo_window",
+                        metavar="SECONDS",
+                        help="seconds a warp can be taken back by pushing the "
+                             "same amount the other way; 0 switches it off "
+                             "(style=warp only)")
 
     redirect = parser.add_argument_group("redirect (overrides the config file)")
     redirect.add_argument("--style", choices=STYLES,
@@ -97,6 +103,15 @@ def report(config, verbose: bool) -> int:
           f"{'' if config_path().exists() else '  (absent; using defaults)'}")
     print(f"detect      : threshold={config.detect.threshold:g} "
           f"window={config.detect.window:g} cooldown={config.detect.cooldown:g}")
+    if not config.detect.undo_window:
+        undo = "off"
+    elif config.redirect.style != WARP:
+        undo = (f"{config.detect.undo_window:g}s, but INACTIVE -- it takes a "
+                f"warp back and style is {config.redirect.style}")
+    else:
+        undo = (f"{config.detect.undo_window:g}s; push "
+                f"{config.detect.threshold:g} back to take a warp back")
+    print(f"undo        : {undo}")
     print(f"redirect    : style={config.redirect.style} "
           f"duration={config.redirect.duration:g} rate={config.redirect.rate:g} "
           f"inset={config.redirect.inset} max_slide={config.redirect.max_slide}")
@@ -321,6 +336,7 @@ def main() -> int:
         config = with_overrides(
             load_config(args.config),
             threshold=args.threshold, window=args.window, cooldown=args.cooldown,
+            undo_window=args.undo_window,
             style=args.style, duration=args.duration, rate=args.rate,
             inset=args.inset, max_slide=args.max_slide,
         )
