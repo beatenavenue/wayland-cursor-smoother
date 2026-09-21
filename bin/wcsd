@@ -1,0 +1,317 @@
+#!/usr/bin/env python3
+"""wayland-cursor-smoother -- slide the pointer past the gaps in a layout.
+
+Runs outside the compositor. It watches the pointer through a KWin script,
+watches the physical pointing devices for a push, and moves the pointer with a
+virtual absolute device when the two agree that the user is pushing against a
+stretch of display edge with nothing behind it.
+
+    wcsd                     # run it
+    wcsd --check             # report what it would do, and change nothing
+    wcsd --write-config      # write a documented config file
+    wcsd --style warp        # override a setting for this run
+
+Settings live in $XDG_CONFIG_HOME/wayland-cursor-smoother.conf; see
+--write-config. Anything given on the command line wins over the file.
+"""
+
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
+
+from wcs.config import (
+    STYLES,
+    ConfigError,
+    config_path,
+    default_config_text,
+    load_config,
+    with_overrides,
+)
+from wcs.daemon import DEVICE_NAME, FEED_MARKER, PLUGIN_NAME, Daemon, log
+from wcs.evdev import list_devices
+from wcs.feed import watch_bands
+from wcs.layout import LayoutError, detect_layout
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="wcsd", description=__doc__,
+        formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--config", type=Path, metavar="PATH",
+                        help=f"config file to read (default: {config_path()})")
+    parser.add_argument("--write-config", nargs="?", const="-", metavar="PATH",
+                        help="write a documented config file and exit; "
+                             "'-' or no argument writes to stdout")
+    parser.add_argument("--check", action="store_true",
+                        help="report the layout, the bands and the devices, "
+                             "then exit without touching anything")
+    parser.add_argument("--diagnose", type=float, nargs="?", const=20.0,
+                        metavar="SECONDS",
+                        help="load the feed script and report, link by link, "
+                             "where the chain breaks; move the pointer through "
+                             "a dead edge while it runs")
+    parser.add_argument("--verbose", action="store_true",
+                        help="log every arm and disarm, not just redirects")
+
+    detect = parser.add_argument_group("detection (overrides the config file)")
+    detect.add_argument("--threshold", type=float,
+                        help="outward device counts that count as a push")
+    detect.add_argument("--window", type=float,
+                        help="seconds before a part-finished push is forgotten")
+    detect.add_argument("--cooldown", type=float,
+                        help="seconds after a redirect before another can fire")
+
+    redirect = parser.add_argument_group("redirect (overrides the config file)")
+    redirect.add_argument("--style", choices=STYLES,
+                          help="glide the pointer to its new position, or warp")
+    redirect.add_argument("--duration", type=float,
+                          help="seconds a glide takes")
+    redirect.add_argument("--rate", type=float,
+                          help="positions emitted per second while gliding")
+    redirect.add_argument("--inset", type=int,
+                          help="pixels inside the destination display to land")
+    redirect.add_argument("--max-slide", type=float, dest="max_slide",
+                          help="refuse to slide further than this along an edge")
+    return parser
+
+
+def report(config, verbose: bool) -> int:
+    print(f"config file : {config_path()}"
+          f"{'' if config_path().exists() else '  (absent; using defaults)'}")
+    print(f"detect      : threshold={config.detect.threshold:g} "
+          f"window={config.detect.window:g} cooldown={config.detect.cooldown:g}")
+    print(f"redirect    : style={config.redirect.style} "
+          f"duration={config.redirect.duration:g} rate={config.redirect.rate:g} "
+          f"inset={config.redirect.inset} max_slide={config.redirect.max_slide}")
+
+    try:
+        layout = detect_layout()
+    except LayoutError as exc:
+        print(f"\nlayout      : UNAVAILABLE -- {exc}")
+        return 1
+    box = layout.bounding_box
+    print(f"\nlayout      : {box.width}x{box.height} at ({box.x},{box.y})")
+    for output in layout.outputs:
+        r = output.rect
+        print(f"  {output.name:<10} {r.width}x{r.height} at ({r.x},{r.y})")
+
+    bands = watch_bands(layout, inset=config.redirect.inset,
+                        max_slide=config.redirect.max_slide)
+    print(f"\nwatching    : {len(bands)} band(s)")
+    for band in bands:
+        r = band.rect
+        print(f"  {band.index}  {band.output:<10} push {band.direction.value:<5} "
+              f"{r.width}x{r.height} at ({r.x},{r.y})")
+    if not bands:
+        print("  Nothing to watch. Either the layout is already a clean")
+        print("  rectangle, or max_slide is refusing every band.")
+
+    devices = [d for d in list_devices(exclude_names=[DEVICE_NAME])
+               if d.is_pointing and d.readable]
+    print(f"\ndevices     : {len(devices)} readable pointing device(s)")
+    for device in devices:
+        print(f"  {device.path:<20} {device.name}")
+    if not devices:
+        print("  None. Without one there is no way to see a push;")
+        print("  run tools/probe_evdev_access.py --write-rule.")
+
+    ready = bool(bands) and bool(devices)
+    print(f"\n{'READY' if ready else 'NOT READY'}")
+    return 0 if ready else 1
+
+
+def diagnose(config, seconds: float) -> int:
+    """Walk the chain and say which link is broken.
+
+    Written because the daemon's first run on real hardware produced nothing
+    at all -- no arming, no redirect, no error. A silent failure has to be
+    cut in half before it can be fixed, and the halves here are: did the feed
+    script load and run, and does its call reach us.
+    """
+    import subprocess
+    from datetime import datetime
+
+    try:
+        import dbus
+        import dbus.service
+        from dbus.mainloop.glib import DBusGMainLoop
+        from gi.repository import GLib
+    except ImportError as exc:
+        print(f"need python3-dbus and python3-gi: {exc}")
+        return 2
+
+    from wcs.feed import feed_script
+    from wcs.kwinscript import (
+        BUS_NAME, FEED_INTERFACE, KWIN_SERVICE, OBJECT_PATH,
+        SCRIPTING_IFACE, SCRIPTING_PATH, DBusError, find_dbus_caller,
+    )
+
+    started = datetime.now()
+    layout = detect_layout()
+    bands = watch_bands(layout, inset=config.redirect.inset,
+                        max_slide=config.redirect.max_slide)
+    print(f"1. layout and bands : {len(bands)} band(s) to watch")
+    for band in bands:
+        r = band.rect
+        print(f"     {band.index}  {band.output} push {band.direction.value} "
+              f"x {r.x}..{r.x + r.width - 1}  y {r.y}..{r.y + r.height - 1}")
+    if not bands:
+        print("   Nothing to watch, so nothing can fire. Stop here.")
+        return 1
+
+    DBusGMainLoop(set_as_default=True)
+    bus = dbus.SessionBus()
+    try:
+        # Kept in a variable on purpose: BusName releases the name from
+        # __del__, so dropping the reference hands it straight back.
+        bus_name = dbus.service.BusName(BUS_NAME, bus, do_not_queue=True)
+    except dbus.exceptions.NameExistsException:
+        print(f"2. d-bus name       : ALREADY OWNED -- is wcsd already running?")
+        return 2
+    print(f"2. d-bus name       : owned ({BUS_NAME})")
+
+    calls = []
+
+    class Feed(dbus.service.Object):
+        @dbus.service.method(FEED_INTERFACE)
+        def Edge(self, index, x, y):
+            calls.append((int(index), int(x), int(y)))
+
+    feed_object = Feed(bus, OBJECT_PATH)
+
+    caller = find_dbus_caller()
+    if caller is None:
+        print("3. feed script      : no qdbus or gdbus to load it with")
+        return 2
+
+    text = feed_script(bands, bus_name=BUS_NAME, object_path=OBJECT_PATH,
+                       interface=FEED_INTERFACE, marker=FEED_MARKER, trace=True)
+    path = Path("/tmp") / "wcs-diagnose-feed.js"
+    path.write_text(text)
+    try:
+        caller.call(KWIN_SERVICE, SCRIPTING_PATH,
+                    f"{SCRIPTING_IFACE}.unloadScript", [PLUGIN_NAME])
+    except DBusError:
+        pass
+    try:
+        loaded = caller.call(KWIN_SERVICE, SCRIPTING_PATH,
+                             f"{SCRIPTING_IFACE}.loadScript", [str(path), PLUGIN_NAME])
+        caller.call(KWIN_SERVICE, SCRIPTING_PATH, f"{SCRIPTING_IFACE}.start")
+        print(f"3. feed script      : loadScript -> {loaded}, start() called")
+        print(f"     source kept at {path} for inspection")
+    except DBusError as exc:
+        print(f"3. feed script      : FAILED -- {exc}")
+        return 1
+
+    try:
+        state = caller.call(KWIN_SERVICE, SCRIPTING_PATH,
+                            f"{SCRIPTING_IFACE}.isScriptLoaded", [PLUGIN_NAME])
+        print(f"4. still loaded     : {state}")
+    except DBusError as exc:
+        print(f"4. still loaded     : could not ask -- {exc}")
+
+    print(f"\n5. listening for {seconds:g}s -- push the pointer into a dead edge now,")
+    print("   and move it along that edge so the script has something to report.")
+    loop = GLib.MainLoop()
+    GLib.timeout_add(int(seconds * 1000), lambda: (loop.quit(), False)[1])
+    try:
+        loop.run()
+    except KeyboardInterrupt:
+        pass
+
+    try:
+        caller.call(KWIN_SERVICE, SCRIPTING_PATH,
+                    f"{SCRIPTING_IFACE}.unloadScript", [PLUGIN_NAME])
+    except DBusError:
+        pass
+
+    assert bus_name is not None and feed_object is not None  # keep them alive
+    print(f"\n6. Edge calls       : {len(calls)}")
+    for call in calls[:10]:
+        print(f"     band={call[0]} at ({call[1]},{call[2]})")
+    if len(calls) > 10:
+        print(f"     ... and {len(calls) - 10} more")
+
+    print("\n7. what the compositor logged")
+    stamp = started.strftime("%Y-%m-%d %H:%M:%S")
+    for command in (
+        ["journalctl", "--user", "-u", "plasma-kwin_wayland.service",
+         "--since", stamp, "--no-pager"],
+        ["journalctl", "--user", "_COMM=kwin_wayland", "--since", stamp, "--no-pager"],
+    ):
+        try:
+            out = subprocess.run(command, capture_output=True, text=True,
+                                 timeout=25).stdout
+        except (OSError, subprocess.TimeoutExpired):
+            continue
+        lines = [ln for ln in out.splitlines()
+                 if FEED_MARKER in ln
+                 or "error" in ln.lower() or "warning" in ln.lower()]
+        if lines:
+            for line in lines[-40:]:
+                print(f"     {line}")
+            break
+    else:
+        print("     nothing found")
+
+    print("\n=== READING THIS ===")
+    if calls:
+        print("The chain works. If the daemon still does nothing, the break is")
+        print("after this point: the push threshold, or the devices it reads.")
+        return 0
+    print("No Edge call arrived. Two possibilities, and the journal above tells")
+    print("them apart:")
+    print(f"  * a line containing '{FEED_MARKER} feed watching' means the script")
+    print("    loaded and ran, so the break is the D-Bus call itself;")
+    print("  * no such line means the script never ran -- look for a JS error,")
+    print("    and check the source kept at the path printed above.")
+    return 1
+
+
+def main() -> int:
+    args = build_parser().parse_args()
+
+    if args.write_config is not None:
+        text = default_config_text()
+        if args.write_config == "-":
+            sys.stdout.write(text)
+        else:
+            path = Path(args.write_config)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            print(f"wrote {path}")
+        return 0
+
+    try:
+        config = with_overrides(
+            load_config(args.config),
+            threshold=args.threshold, window=args.window, cooldown=args.cooldown,
+            style=args.style, duration=args.duration, rate=args.rate,
+            inset=args.inset, max_slide=args.max_slide,
+        )
+    except ConfigError as exc:
+        print(f"config: {exc}", file=sys.stderr)
+        return 2
+
+    if args.check:
+        return report(config, args.verbose)
+
+    if args.diagnose is not None:
+        return diagnose(config, args.diagnose)
+
+    try:
+        return Daemon(config, verbose=args.verbose).run()
+    except LayoutError as exc:
+        log(f"cannot read the display layout: {exc}")
+        return 2
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except KeyboardInterrupt:
+        sys.exit(130)
