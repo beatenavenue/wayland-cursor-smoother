@@ -186,6 +186,8 @@ Two things here are matters of taste and neither can be settled by argument,
 so both are settings: how hard you have to push, and whether the pointer
 jumps or travels.
 
+![glide and warp](img/style.svg)
+
 ```bash
 ./bin/wcsd --write-config ~/.config/wayland-cursor-smoother.conf
 ```

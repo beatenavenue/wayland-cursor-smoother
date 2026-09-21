@@ -1,0 +1,92 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 366" width="920" height="366" role="img" aria-labelledby="t d">
+  <title id="t">glide and warp</title>
+  <desc id="d">The pointer is pushed against a stretch of display edge that the neighbouring display does not reach. With style = glide it travels: along the edge to the nearest point the neighbour reaches, then across. With style = warp it arrives there with no path, and an equal push the other way puts it back exactly where it was.</desc>
+
+  <style>
+    .ink   { fill: #1f2328 }
+    .muted { fill: #656d76 }
+    .panel { fill: #ffffff; stroke: #8c959f; stroke-width: 2 }
+    .card  { fill: #f6f8fa; stroke: #d0d7de; stroke-width: 1 }
+    .rule  { stroke: #d0d7de; stroke-width: 1 }
+    .dead  { fill: #cf222e }
+    .lead  { stroke: #656d76; stroke-width: 1.2; fill: none }
+    .halo  { stroke: #ffffff; stroke-width: 6; fill: none; stroke-linecap: round; stroke-linejoin: round }
+    .go    { stroke: #0969da; stroke-width: 3.5; fill: none; stroke-linecap: round; stroke-linejoin: round }
+    .back  { stroke: #1a7f37; stroke-width: 3; fill: none; stroke-linecap: round; stroke-dasharray: 9 6 }
+    text   { font-family: ui-sans-serif, -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif }
+    .h     { font-size: 20px; font-weight: 700 }
+    .mono  { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace }
+    .cap   { font-size: 15px }
+    .tag   { font-size: 13px }
+  </style>
+
+  <defs>
+    <!-- a pointer, drawn from its hotspot at (0,0) -->
+    <g id="cur">
+      <path d="M0,0 L0,20 L5.2,15.2 L8.7,23 L12.3,21.4 L9,13.9 L16,13.5 Z"
+            fill="#1f2328" stroke="#ffffff" stroke-width="1.4" stroke-linejoin="round"/>
+    </g>
+    <marker id="arrow" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,1 L9,5 L0,9 z" fill="#0969da"/>
+    </marker>
+    <marker id="arrowback" viewBox="0 0 10 10" refX="7.5" refY="5" markerWidth="5" markerHeight="5" orient="auto-start-reverse">
+      <path d="M0,1 L9,5 L0,9 z" fill="#1a7f37"/>
+    </marker>
+  </defs>
+
+  <rect class="card" x="0.5" y="0.5" width="919" height="365" rx="10"/>
+  <line class="rule" x1="460" y1="26" x2="460" y2="340"/>
+
+  <!-- ================= glide ================= -->
+  <g transform="translate(40,34)">
+    <text class="h ink" x="0" y="0">style = <tspan class="mono">glide</tspan></text>
+
+    <g transform="translate(24,22)">
+      <rect class="panel" x="150" y="8"  width="170" height="190" rx="3"/>
+      <rect class="panel" x="20"  y="34" width="130" height="66"  rx="3"/>
+      <rect class="dead" x="144" y="8"   width="6" height="26"/>
+      <rect class="dead" x="144" y="100" width="6" height="98"/>
+
+      <path class="lead" d="M96,159 L144,159"/>
+      <text class="tag muted" x="20" y="146">nothing behind</text>
+      <text class="tag muted" x="20" y="164">this stretch</text>
+
+      <!-- it travels: along the edge, then across -->
+      <path class="go"   d="M166,182 L166,90"/>
+      <path class="halo" d="M166,90 L130,90"/>
+      <path class="go"   d="M166,90 L130,90" marker-end="url(#arrow)"/>
+      <use href="#cur" x="166" y="182"/>
+      <use href="#cur" x="120" y="86"/>
+    </g>
+
+    <text class="cap muted" x="0" y="272">The pointer <tspan class="ink" font-weight="600">travels</tspan>: along the edge to the nearest</text>
+    <text class="cap muted" x="0" y="294">point the neighbour reaches, then across. Going</text>
+    <text class="cap muted" x="0" y="316">back costs the motion it cost to arrive.</text>
+  </g>
+
+  <!-- ================= warp ================= -->
+  <g transform="translate(500,34)">
+    <text class="h ink" x="0" y="0">style = <tspan class="mono">warp</tspan></text>
+
+    <g transform="translate(24,22)">
+      <rect class="panel" x="150" y="8"  width="170" height="190" rx="3"/>
+      <rect class="panel" x="20"  y="34" width="130" height="66"  rx="3"/>
+      <rect class="dead" x="144" y="8"   width="6" height="26"/>
+      <rect class="dead" x="144" y="100" width="6" height="98"/>
+
+      <!-- no path: it was there, and then it is here -->
+      <g opacity="0.35"><use href="#cur" x="166" y="182"/></g>
+      <use href="#cur" x="120" y="86"/>
+
+      <!-- an equal push the other way brings it back -->
+      <path class="halo" d="M128,100 L164,176"/>
+      <path class="back" d="M128,100 L164,176" marker-end="url(#arrowback)"/>
+      <text class="tag" x="20" y="146" fill="#1a7f37">an equal push</text>
+      <text class="tag" x="20" y="164" fill="#1a7f37">back returns it</text>
+    </g>
+
+    <text class="cap muted" x="0" y="272">The pointer <tspan class="ink" font-weight="600">arrives</tspan>. There is no path to follow,</text>
+    <text class="cap muted" x="0" y="294">so an equal push the other way puts it back</text>
+    <text class="cap muted" x="0" y="316">exactly where it was.</text>
+  </g>
+</svg>
