@@ -406,32 +406,11 @@ than prose can:
   than its neighbour. **That one is this project's problem**, and the picture
   there is the same shape as `img/motivation.png`.
 
-**[Little Big Mouse](https://github.com/mgth/LittleBigMouse)** takes a
-different route, and the difference is instructive.
-
-Rather than watching for a stuck pointer and jumping it, it *owns* pointer
-movement. Each display is a zone placed in millimetres; every edge is cut into
-sections; each section either links to the zone beyond it — position along the
-edge carried across — or is a **wall**. There is no trigger to tune because
-there is no jump: the pointer goes where the movement vector takes it, or it
-stops.
-
-Two things about it are worth knowing before borrowing anything:
-
-- **A stretch of edge with nothing behind it becomes a wall**, so out of the
-  box it does not do what this project does. What it fixes is *where* a
-  crossing lands: a 4K panel beside a 1080p one, crossed at the same physical
-  height instead of the same pixel row.
-- **Its Linux backend grabs the physical mice** (`EVIOCGRAB`) and re-injects a
-  corrected stream through `/dev/uinput`, re-implementing pointer acceleration
-  from `kcminputrc` along the way. That is what lets it be continuous where
-  this project is discrete — and it is the one thing this project's design
-  gives up by adding events rather than replacing them. It is developed on KDE
-  Plasma 6 Wayland, like this.
-
-Its own README warns that `littlebigmouse.com` is not the project and
-distributes malware; the project is on GitHub and at
-[littlebigmouse.mgth.fr](https://littlebigmouse.mgth.fr/).
+**[Little Big Mouse](https://github.com/mgth/LittleBigMouse)** is a separate
+tool for a separate problem, worth knowing about if your displays differ in
+pixel density: it is about where the pointer lands *physically* when it
+crosses between displays, rather than at the matching pixel row. It runs on
+Windows, and its newer Linux backend is developed on KDE Plasma 6 Wayland.
 
 ### What Windows 11 itself does
 
