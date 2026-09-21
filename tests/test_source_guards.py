@@ -79,3 +79,37 @@ class DiscardedResultTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class NoWritingIntoTheCheckoutTest(unittest.TestCase):
+    """A tool must not drop files into the directory it was run from.
+
+    `--write-rule` defaulted to a bare filename, so it wrote into the working
+    directory -- in practice the git checkout. The author found an untracked
+    `71-wayland-cursor-smoother.rules` and had to ask whether it mattered. It
+    did not: the copy that takes effect is the one installed under
+    /etc/udev/rules.d, and that one is a staging file. Leaving something in a
+    repository that looks like it might be part of the project is its own
+    small cost.
+    """
+
+    @staticmethod
+    def load(relative):
+        import importlib.util
+        path = ROOT / relative
+        spec = importlib.util.spec_from_file_location(path.stem, path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+
+    def test_the_rule_is_staged_outside_the_working_directory(self):
+        probe = self.load("tools/probe_evdev_access.py")
+        default = Path(probe.DEFAULT_RULE_OUTPUT)
+        self.assertTrue(default.is_absolute(), default)
+        self.assertNotIn(ROOT, default.parents, default)
+
+    def test_the_config_default_goes_to_stdout_rather_than_a_file(self):
+        # wcsd --write-config with no argument prints; writing a file is an
+        # explicit choice, which is the same principle from the other side.
+        source = (ROOT / "bin" / "wcsd").read_text()
+        self.assertIn('"--write-config", nargs="?", const="-"', source)

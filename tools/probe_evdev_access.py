@@ -32,6 +32,7 @@ import select
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
@@ -52,6 +53,14 @@ from wcs.evdev import (
 )
 
 OWN_DEVICE_NAME = "wayland-cursor-smoother virtual pointer"
+
+#: Where the generated rule lands when no path is given. An absolute path on
+#: purpose: the default used to be a bare filename, which wrote into whatever
+#: directory the probe was run from -- in practice the git checkout, leaving an
+#: untracked file that looks like it might matter. The copy that matters is the
+#: one installed under /etc/udev/rules.d; this is only the staging file the
+#: install command reads.
+DEFAULT_RULE_OUTPUT = Path(tempfile.gettempdir()) / RULE_FILENAME
 
 
 def section(title: str) -> None:
@@ -160,6 +169,8 @@ def write_rule(path: Path) -> None:
     for command in uninstall_commands():
         print(f"  {command}")
     print(f"\nWritten to: {path}")
+    print("This file is only staging for the install command above; the copy")
+    print("that takes effect is the one under /etc/udev/rules.d.")
 
 
 def watch(devices: list[InputDevice], seconds: float) -> None:
@@ -225,8 +236,10 @@ def watch(devices: list[InputDevice], seconds: float) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--write-rule", nargs="?", const=RULE_FILENAME, metavar="PATH",
-                        help="write the udev rule locally and print how to install it")
+    parser.add_argument("--write-rule", nargs="?", const=str(DEFAULT_RULE_OUTPUT),
+                        metavar="PATH",
+                        help=f"write the udev rule and print how to install it "
+                             f"(default: {DEFAULT_RULE_OUTPUT})")
     parser.add_argument("--watch", type=float, metavar="SECONDS",
                         help="read the readable pointing devices and report which "
                              "ones actually deliver motion")
