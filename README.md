@@ -154,26 +154,29 @@ $ ./bin/wcsd
 Push into a dead edge and the pointer slides onto the neighbour. `--verbose`
 logs each arm and disarm as well, which is what you want while tuning.
 
-To start it with your session, as a systemd user unit — adjust the path:
+### 4. Start it with your session
 
-```ini
-# ~/.config/systemd/user/wayland-cursor-smoother.service
-[Unit]
-Description=wayland-cursor-smoother
-PartOf=graphical-session.target
-After=plasma-kwin_wayland.service
-
-[Service]
-ExecStart=%h/src/wayland-cursor-smoother/bin/wcsd
-Restart=on-failure
-
-[Install]
-WantedBy=graphical-session.target
-```
+A systemd user unit is generated for this checkout, with every path already
+filled in — there is nothing to edit:
 
 ```console
+$ ./bin/wcsd --write-service                       # read it first
+$ ./bin/wcsd --write-service ~/.config/systemd/user/wayland-cursor-smoother.service
+$ systemctl --user daemon-reload
 $ systemctl --user enable --now wayland-cursor-smoother
+$ journalctl --user -u wayland-cursor-smoother -f
 ```
+
+Three things in the unit are worth knowing about:
+
+- **It waits for KWin.** The daemon reports a feed script it could not load
+  and keeps running, so a start that beats the compositor to the session bus
+  leaves a process that looks healthy and receives nothing. The unit blocks
+  until KWin's scripting interface answers.
+- **Reload re-reads your displays.** After rearranging monitors,
+  `systemctl --user reload wayland-cursor-smoother` recomputes the dead bands
+  without dropping the virtual pointer. That is `SIGHUP`, described below.
+- **It stops with your session**, and is restarted if it fails.
 
 ---
 
@@ -211,8 +214,10 @@ $ ./bin/wcsd --verbose --duration 0.15       # a slower glide
 A mistyped key is an error rather than something silently ignored, so a
 setting that does nothing will tell you why.
 
-Changing the config needs a restart. `SIGHUP` re-reads the display layout
-only — send it after rearranging your monitors.
+Changing the config needs a restart — `systemctl --user restart
+wayland-cursor-smoother` if you installed the unit above. `SIGHUP` re-reads
+the display layout only, and is what `systemctl --user reload` sends; send it
+after rearranging your monitors.
 
 ---
 

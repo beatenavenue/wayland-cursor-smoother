@@ -60,6 +60,9 @@ one of the explanations this file first offered for it was itself wrong.
 - **The feel is not settled.** The author reports it differs from Windows in
   some way not yet pinned down. `threshold`, `style` and `duration` are the
   knobs; which one is responsible has not been established.
+- **The systemd user unit has never been installed.** `wcsd --write-service`
+  generates it, and its shape is pinned by tests, but no session has started
+  the daemon through systemd. See "Running it with the session", below.
 - **A stale `Cursor Feed 1.0` KWin script package** is installed on the
   author's machine from the original attempt. It is disabled and unrelated to
   anything here — the daemon loads its feed from a temp file and never
@@ -1436,3 +1439,85 @@ it. Read the evidence that already exists before generating more.
 `BusName` and a default path that writes into the checkout are both invisible
 at runtime. `tests/test_source_guards.py` reads source rather than behaviour,
 which is worth doing exactly this rarely.
+
+## Settled decision 9 — a tray-resident front end is rejected, 2026-09-21
+
+The author raised their own `dimmgr` (a PyQt5 `QSystemTrayIcon` front end for
+PowerDevil's display timeout) as a model for making this daemon's residency
+visible, and then withdrew it: *the state being visible is nice, but it only
+adds clutter.* Treat that as closed.
+
+Recorded because the reasoning was not only taste, and a later session may be
+tempted by the same idea:
+
+- **Merging the GUI into the daemon costs the proven configuration.** The
+  daemon is built on `DBusGMainLoop` + `GLib.MainLoop` + `GLib.unix_signal_add`
+  + GLib fd watches, and its D-Bus receiving object is literally the shape
+  `probe_dbus_link.py` proved on hardware. A Qt main loop means rewriting that
+  half, against this file's own lesson about never running a configuration
+  different from the one that was tested.
+- **It also weakens decision 4's separation.** A tray bug would take the
+  redirect down with it.
+- **A tray as a separate controller** (the shape `dimmgr` actually has --
+  presets, a restart item, a status icon, talking to something else that does
+  the work) has none of those problems and remains available: the daemon
+  already owns a bus name with a `Reload` method, so adding `Status`, `Pause`
+  and `SetStyle` would use the proven path. It is not wanted now.
+- Residency and the tray are orthogonal in any case. A tray app still has to
+  be started at login, so it is a front layer, not an autostart mechanism.
+
+## Running it with the session, 2026-09-21: generated, and UNVERIFIED
+
+`wcsd --write-service` renders a systemd user unit for the checkout it is run
+from. **Nothing below has been run through systemd**: this was written in a
+container with no systemd user manager, no session bus and no KWin. What the
+tests pin is the shape of the file, not that it starts anything.
+
+### Why generate it rather than paste one into the README
+
+The README carried a unit with `%h/src/wayland-cursor-smoother/bin/wcsd` in it
+and a note to adjust the path. Two reasons that is the worse answer here, and
+both are the argument `--write-rule` already made for the udev rule:
+
+- **The paths are knowable.** `wcsd` knows where it is installed, which
+  interpreter is running it, and which of `qdbus`/`gdbus`/`busctl` exists. A
+  generated unit needs no editing, and editing is where a `%h` guess becomes a
+  unit that fails to load.
+- **Installables are not committed to the checkout.** The copy that takes
+  effect lives under `~/.config/systemd/user`; a second copy tracked in the
+  repository is exactly the "is this part of the project?" cost that commit
+  7a2eae9 removed. `--write-service` prints to stdout, like `--write-config`,
+  and writing a file stays an explicit choice.
+
+### The hazard the unit exists to guard
+
+`Daemon._load_script` logs a failure and carries on (`src/wcs/daemon.py`). That
+is right for a compositor that goes away mid-session — the daemon should not
+take itself down — but it means **a daemon started before KWin answers on the
+session bus runs perfectly and receives nothing.** Silence, again, and with no
+nonzero exit `Restart=on-failure` would not notice.
+
+`After=plasma-kwin_wayland.service` is expected to be sufficient on its own.
+That expectation is **not verified** — it rests on KWin's unit being
+`Type=notify`, which was not checked against the installed Plasma. So the unit
+also blocks on an `ExecStartPre` that polls KWin's `/Scripting` object until it
+answers, bounded by `timeout 30`. It asks with whichever tool
+`find_dbus_caller()` picks, so a machine where the gate passes is a machine
+where the script load will work.
+
+**The option not taken:** making the script load retry, or fail the process,
+inside the daemon. That is the fix with real teeth, and it is a change to how
+the daemon behaves when KWin restarts mid-session — a separate decision from
+how it is started, and not one to take while implementing an autostart unit.
+
+### Small things the unit settles
+
+- `ExecReload` sends `SIGHUP`, so `systemctl --user reload` re-reads the
+  layout without dropping the virtual pointer or the feed script. The signal
+  handler already existed; nothing but the unit was needed to expose it.
+- `RestartSec=5`, because a second copy started by hand exits 2 on the taken
+  bus name and would otherwise spin against the start limit.
+- No `%` specifier appears anywhere, and `tests/test_service.py` fails if one
+  does: every path is baked, so a `%` could only be a mistake, and an unknown
+  specifier makes systemd refuse the whole unit.
+

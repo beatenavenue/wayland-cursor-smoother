@@ -8,7 +8,8 @@ stretch of display edge with nothing behind it.
 
     wcsd                     # run it
     wcsd --check             # report what it would do, and change nothing
-    wcsd --write-config      # write a documented config file
+    wcsd --write-config      # print a documented config file
+    wcsd --write-service     # print a systemd user unit for this checkout
     wcsd --style warp        # override a setting for this run
 
 Settings live in $XDG_CONFIG_HOME/wayland-cursor-smoother.conf; see
@@ -18,6 +19,7 @@ Settings live in $XDG_CONFIG_HOME/wayland-cursor-smoother.conf; see
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -34,7 +36,14 @@ from wcs.config import (
 from wcs.daemon import DEVICE_NAME, FEED_MARKER, PLUGIN_NAME, Daemon, log
 from wcs.evdev import list_devices
 from wcs.feed import watch_bands
+from wcs.kwinscript import find_dbus_caller
 from wcs.layout import LayoutError, detect_layout
+from wcs.service import (
+    default_unit_path,
+    install_commands,
+    readiness_command,
+    service_text,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +55,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--write-config", nargs="?", const="-", metavar="PATH",
                         help="write a documented config file and exit; "
                              "'-' or no argument writes to stdout")
+    parser.add_argument("--write-service", nargs="?", const="-", metavar="PATH",
+                        help="write a systemd user unit that runs this "
+                             "checkout and exit; '-' or no argument writes to "
+                             f"stdout (installed at {default_unit_path()})")
     parser.add_argument("--check", action="store_true",
                         help="report the layout, the bands and the devices, "
                              "then exit without touching anything")
@@ -284,6 +297,24 @@ def main() -> int:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(text)
             print(f"wrote {path}")
+        return 0
+
+    if args.write_service is not None:
+        caller = find_dbus_caller()
+        text = service_text(
+            [sys.executable, str(Path(__file__).resolve())],
+            ready=readiness_command(shutil.which(caller.program) if caller else None),
+        )
+        if args.write_service == "-":
+            sys.stdout.write(text)
+        else:
+            path = Path(args.write_service)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            print(f"wrote {path}")
+            print("Then:")
+            for command in install_commands(path):
+                print(f"  {command}")
         return 0
 
     try:
