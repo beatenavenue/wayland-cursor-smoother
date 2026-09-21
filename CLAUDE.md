@@ -19,19 +19,51 @@ Guidance for Claude Code (and humans) working in this repository.
 
 ## Project status
 
-**Nothing is implemented.** The repository contains documentation only: this
-file, `README.md`, a LICENSE and one image. No source file has ever existed
-here. The `work/feed` branch was created but never used and points at the same
-commit as `main`.
+**It works, and it is in use.** `bin/wcsd` runs as a daemon and redirects the
+pointer out of the dead bands in the author's layout. Built and confirmed on
+hardware on 2026-09-21: Plasma 6.3.6 / KWin 6.3.6, Debian 13, kernel 6.12.
+
+> [!IMPORTANT]
+> **This file is a record of how that happened, not a description of what
+> exists.** For what the thing is and how to run it, read `README.md`, which
+> is written for a stranger. Read this one to find out why a decision was
+> taken, what was tried and rejected, and which claims below were believed and
+> then turned out to be false.
+>
+> **Sections written before something ran are marked where they have been
+> superseded.** Nothing is deleted — a later reader needs to see that a claim
+> was once believed — but a stale claim that is merely old and a stale claim
+> that was actively harmful are different things, and the harmful ones now say
+> so at the point of reading rather than four hundred lines later.
 
 An earlier attempt (done with a different assistant) stalled before it could
 even read the pointer position, and the project was frozen from 2025-11 until
-the research recorded here was carried out on 2026-09-20. That research explains
-why the earlier attempt could not have succeeded, and what is actually
-available.
+the research recorded here was carried out on 2026-09-20. The record below
+explains why that attempt could not have succeeded — and, further down, why
+one of the explanations this file first offered for it was itself wrong.
 
-Nothing below has been tested on the author's hardware. It is all derived from
-reading upstream source.
+### Where to look
+
+| | |
+|---|---|
+| What exists and how to run it | `README.md` |
+| Why each approach was rejected | "Verified platform constraints", below |
+| What the author decided, and why | "Settled decisions" parts 1 and 2, and decision 8 |
+| What was measured on hardware | the dated probe-result sections |
+| Claims that turned out wrong | every section headed **Correction** |
+
+### What is still open
+
+- **Mixed-DPI is untested.** Every display on this desk reports `Scale: 1`, so
+  logical and physical pixels coincide here. The code works in KWin's logical
+  coordinates throughout, which should be correct, but "should" is not a test.
+- **The feel is not settled.** The author reports it differs from Windows in
+  some way not yet pinned down. `threshold`, `style` and `duration` are the
+  knobs; which one is responsible has not been established.
+- **A stale `Cursor Feed 1.0` KWin script package** is installed on the
+  author's machine from the original attempt. It is disabled and unrelated to
+  anything here — the daemon loads its feed from a temp file and never
+  installs a package — but it will confuse whoever finds it next.
 
 ## Goal
 
@@ -60,6 +92,11 @@ xdg-desktop-portal-kde source at `master` on 2026-09-20. **These are private,
 ABI-unstable internals — re-verify against the Plasma version actually in use
 before relying on any of it.**
 
+> [!WARNING]
+> Written from source, before anything ran. Most of it held; **two claims did
+> not**, and both are flagged inline below. Source-reading was good enough to
+> rule approaches out and not good enough to rule one in.
+
 ### A KWin script cannot move the pointer
 
 `src/scripting/workspace_wrapper.h`:
@@ -76,6 +113,13 @@ read-only with no warp.
 script publishing positions over D-Bus, plus a Python *glide_cursor* that moves
 the pointer) cannot work as written. The feed half is possible; the moving half
 has no API behind it. That design is superseded.
+
+> [!CAUTION]
+> **The note that follows is WRONG and acting on it would cost you days.**
+> A plain JS script reads the cursor fine, and a declarative one has no
+> `callDBus`, so following this advice produces a script that works perfectly
+> and can tell nothing outside the compositor. Left in place because it was
+> believed; see "Feed probe, 2026-09-21" for what was measured.
 
 Note on the feed half, if it is ever needed: `Workspace` is only available as a
 QML singleton on KWin 6+, so a KWin script must be the QML/declarative kind, not
@@ -350,6 +394,11 @@ udev rule).
 If this holds, the read half can be a QML KWin script feeding positions over
 D-Bus, as originally sketched — see below.
 
+> [!NOTE]
+> It held. The device classifies as a pointer and reaches every display; see
+> "Probe result, 2026-09-20". The read half is a **JS** script, not a QML one,
+> for the reason flagged above.
+
 ### The original two-component design, and why it was removed from the README
 
 `README.md` originally described a *Cursor Feed* KWin script publishing pointer
@@ -402,6 +451,12 @@ inside the compositor on every pointer motion event, so a crash takes down the
 session. Decision 4 rules that out. Do not propose it again.
 
 ## If and when implementation starts
+
+> [!NOTE]
+> **Historical: this was the plan, and it was followed.** Every item below was
+> done and every one of them paid off, which is the reason it is kept rather
+> than deleted. It is also the right checklist to re-run after a Plasma
+> upgrade — the probes it describes all still exist.
 
 - The target environment's Plasma version must be established first
   (`plasmashell --version`). Every finding above is version-sensitive.
@@ -1348,3 +1403,36 @@ it, so the emitted reports are checked byte for byte with no device present:
 that a first move is one plain report, that a repeat is preceded by a nudge,
 that the nudge goes up rather than down at axis zero, and that the position
 which lands is always the one asked for.
+
+## The method, since it worked three times
+
+Three failures in this project were silences: something started cleanly, logged
+nothing wrong, and did nothing. Each was found the same way, and none was found
+by reading the code.
+
+**Cut the silence in half, with a tool, and let the machine answer.** Not
+"which line is wrong" but "which half of the chain is dead". `--diagnose`
+exists because the daemon was mute; the feed script's `trace` mode exists
+because `--diagnose` narrowed it to one of two possibilities and could not
+choose between them.
+
+**Make the thing under test say what it sees.** `wcs-feed sees 1920,2054 ->
+band 1` settled in one line what no amount of reading the rectangle test could:
+the geometry was right, the position was right, and the call was reached. That
+left only the address, and the address was a bus name that had been released.
+
+**A guess is not a diagnosis, even a good one.** Midway through, the
+`in_signature="iii"` deviation was spotted and corrected. The reasoning was
+sound — never run a configuration different from the one that was proven — and
+it was not the bug. Reporting it as fixed would have cost the author another
+round trip. Correct the deviation, say it is *a* deviation, and keep measuring.
+
+**The log already knew.** Three consecutive redirects from an identical source
+position can only mean the pointer never moved, because the feed reports on
+change. That was printed on screen before anyone asked the right question of
+it. Read the evidence that already exists before generating more.
+
+**Write the guard where the failure has no runtime signal.** A discarded
+`BusName` and a default path that writes into the checkout are both invisible
+at runtime. `tests/test_source_guards.py` reads source rather than behaviour,
+which is worth doing exactly this rarely.
