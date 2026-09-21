@@ -86,8 +86,8 @@ solves this.
 
 On Debian or Ubuntu the two Python bindings are:
 
-```console
-$ sudo apt install python3-dbus python3-gi
+```bash
+sudo apt install python3-dbus python3-gi
 ```
 
 If `./bin/wcsd --check` reports that `kscreen-doctor` is missing, install
@@ -101,8 +101,8 @@ whichever package your distribution ships KScreen's command line tool in.
 
 This changes nothing, creates no device and needs no permissions:
 
-```console
-$ ./bin/wcsd --check
+```bash
+./bin/wcsd --check
 ```
 
 It prints your layout, every stretch of edge with nothing behind it, where the
@@ -128,8 +128,8 @@ of *one* device sharing them — so such a rule hands over the keystrokes it was
 written to protect. Matching what udev has already classified each node as
 avoids that, and survives replacing the mouse:
 
-```console
-$ ./tools/probe_evdev_access.py --write-rule
+```bash
+./tools/probe_evdev_access.py --write-rule
 ```
 
 That prints the rule, writes it to a staging file and gives you the three
@@ -138,8 +138,8 @@ it grants anything at all. Re-run the probe afterwards: it checks two things,
 and the second matters more than the first — some pointing device must be
 readable, and **no keyboard may be**.
 
-```console
-$ ./tools/probe_evdev_access.py --watch 20
+```bash
+./tools/probe_evdev_access.py --watch 20
 ```
 
 Move every pointing device you own while that runs. Each should report a
@@ -147,33 +147,36 @@ non-zero count; one that stays silent cannot drive a push.
 
 ### 3. Run it
 
-```console
-$ ./bin/wcsd
+```bash
+./bin/wcsd
 ```
 
 Push into a dead edge and the pointer slides onto the neighbour. `--verbose`
 logs each arm and disarm as well, which is what you want while tuning.
 
-To start it with your session, as a systemd user unit — adjust the path:
+### 4. Start it with your session
 
-```ini
-# ~/.config/systemd/user/wayland-cursor-smoother.service
-[Unit]
-Description=wayland-cursor-smoother
-PartOf=graphical-session.target
-After=plasma-kwin_wayland.service
+A systemd user unit is generated for this checkout, with every path already
+filled in — there is nothing to edit:
 
-[Service]
-ExecStart=%h/src/wayland-cursor-smoother/bin/wcsd
-Restart=on-failure
-
-[Install]
-WantedBy=graphical-session.target
+```bash
+./bin/wcsd --write-service                       # read it first
+./bin/wcsd --write-service ~/.config/systemd/user/wayland-cursor-smoother.service
+systemctl --user daemon-reload
+systemctl --user enable --now wayland-cursor-smoother
+journalctl --user -u wayland-cursor-smoother -f
 ```
 
-```console
-$ systemctl --user enable --now wayland-cursor-smoother
-```
+Three things in the unit are worth knowing about:
+
+- **It waits for KWin.** The daemon reports a feed script it could not load
+  and keeps running, so a start that beats the compositor to the session bus
+  leaves a process that looks healthy and receives nothing. The unit blocks
+  until KWin's scripting interface answers.
+- **Reload re-reads your displays.** After rearranging monitors,
+  `systemctl --user reload wayland-cursor-smoother` recomputes the dead bands
+  without dropping the virtual pointer. That is `SIGHUP`, described below.
+- **It stops with your session**, and is restarted if it fails.
 
 ---
 
@@ -183,18 +186,20 @@ Two things here are matters of taste and neither can be settled by argument,
 so both are settings: how hard you have to push, and whether the pointer
 jumps or travels.
 
-```console
-$ ./bin/wcsd --write-config ~/.config/wayland-cursor-smoother.conf
+![glide and warp](img/style.svg)
+
+```bash
+./bin/wcsd --write-config ~/.config/wayland-cursor-smoother.conf
 ```
 
 That writes a documented file holding exactly the built-in defaults, so a
 fresh copy changes nothing. Every value can also be given on the command line,
 which is much faster while you are finding what you like:
 
-```console
-$ ./bin/wcsd --verbose --threshold 50        # fire on a lighter push
-$ ./bin/wcsd --verbose --style warp          # jump instantly, as Windows does
-$ ./bin/wcsd --verbose --duration 0.15       # a slower glide
+```bash
+./bin/wcsd --verbose --threshold 50        # fire on a lighter push
+./bin/wcsd --verbose --style warp          # jump instantly, as Windows does
+./bin/wcsd --verbose --duration 0.15       # a slower glide
 ```
 
 | Setting | Default | What it changes |
@@ -207,12 +212,36 @@ $ ./bin/wcsd --verbose --duration 0.15       # a slower glide
 | `rate` | 120 | Positions emitted per second while gliding |
 | `inset` | 2 | Pixels inside the destination display to land. A safety margin, not a preference |
 | `max_slide` | none | Refuse to redirect when the pointer would have to slide further than this along an edge |
+| `undo_window` | 3 | Seconds a **warp** can be taken back by pushing `threshold` the other way. `off` disables it; it does nothing under `style = glide` |
+
+### Taking a warp back
+
+What you feel while using a pointer is how far your hand moved, not where the
+pointer is — the pointer is barely watched, and often lost. That is why a dead
+zone is worth fixing at all: your hand moves and the pointer is not where you
+expected it.
+
+A warp has the same problem from the other side. When it puts the pointer
+somewhere you did not ask for, your hand is holding a displacement it never
+made, and pushing back does not undo it — the way home is a detour around the
+edge the redirect slid along.
+
+So a warp stays undoable for `undo_window` seconds: **push `threshold` the
+other way and the pointer goes back exactly where it was.** The same amount of
+motion buys it and buys it back. A button press cancels the offer, because
+clicking means you meant to be there.
+
+A glide needs none of this and does not get it: it already travelled the way
+back in front of you, and retracing it costs the motion it cost to arrive.
 
 A mistyped key is an error rather than something silently ignored, so a
-setting that does nothing will tell you why.
+setting that does nothing will tell you why. `--check` also prints whether the
+undo is actually active, since `undo_window` is inert under `glide`.
 
-Changing the config needs a restart. `SIGHUP` re-reads the display layout
-only — send it after rearranging your monitors.
+Changing the config needs a restart — `systemctl --user restart
+wayland-cursor-smoother` if you installed the unit above. `SIGHUP` re-reads
+the display layout only, and is what `systemctl --user reload` sends; send it
+after rearranging your monitors.
 
 ---
 
@@ -274,13 +303,13 @@ pointer lands cannot drift between two languages.
 Every layer has a probe that answers one question and stops guessing at the
 next.
 
-```console
-$ ./bin/wcsd --check                    # layout, dead bands, readable devices
-$ ./bin/wcsd --diagnose                 # walk the chain, say which link is broken
-$ ./tools/probe_uinput.py               # can a virtual pointer reach every display?
-$ ./tools/probe_evdev_access.py         # what can be read, and what must not be
-$ ./tools/probe_kwin_feed.py            # can a KWin script read the pointer?
-$ ./tools/probe_dbus_link.py            # can that script call the daemon?
+```bash
+./bin/wcsd --check                    # layout, dead bands, readable devices
+./bin/wcsd --diagnose                 # walk the chain, say which link is broken
+./tools/probe_uinput.py               # can a virtual pointer reach every display?
+./tools/probe_evdev_access.py         # what can be read, and what must not be
+./tools/probe_kwin_feed.py            # can a KWin script read the pointer?
+./tools/probe_dbus_link.py            # can that script call the daemon?
 ```
 
 `--diagnose` is the one to reach for when the daemon starts cleanly and does
@@ -294,8 +323,8 @@ can watch the pointer stop at a dead edge and then slide onto the neighbour.
 
 ### Tests
 
-```console
-$ python3 -m unittest discover -s tests
+```bash
+python3 -m unittest discover -s tests
 ```
 
 Standard library only, no display needed. They cover the layout maths, the
@@ -349,6 +378,58 @@ way it does.
 Ideally none of this would be necessary and a compositor would simply do the
 right thing at a discontinuous layout. I would be glad to see this become
 redundant.
+
+## Prior art
+
+**[MouseUnSnag](https://github.com/MouseUnSnag/MouseUnSnag)** solves the same
+problem on Windows 10, and is worth reading before changing anything here.
+
+It hooks `WH_MOUSE_LL`, which hands it the position the mouse *asked* for
+before Windows clamps it. Comparing that against the actual cursor position
+tells it "the cursor did not go where the mouse pointed" from a single event —
+no threshold, no accumulator, no timing window. It then calls `SetCursorPos`
+and returns `1` from the hook, which **swallows** the motion that caused the
+jump.
+
+Neither of those is available here. A Wayland client cannot see the unclamped
+position, and a virtual input device can only add events, never remove the
+user's. Most of what this project does differently follows from those two
+facts.
+
+The two problems MouseUnSnag names, with the pictures that explain them better
+than prose can:
+
+- [How to disable sticky corners in Windows 10](https://superuser.com/questions/947817/how-to-disable-sticky-corners-in-windows-10)
+  — deliberate resistance at a corner. **Not this project's problem**; the KWin
+  equivalent is `CornerBarrier`, and removing resistance is not the same as
+  adding redirection.
+- [How to make the mouse wrap from corners when moving between monitors?](https://superuser.com/questions/865469/how-to-make-the-mouse-wrap-from-corners-when-moving-between-monitors)
+  — a stretch of edge with nothing behind it, because one display is taller
+  than its neighbour. **That one is this project's problem**, and the picture
+  there is the same shape as `img/motivation.png`.
+
+**[Little Big Mouse](https://github.com/mgth/LittleBigMouse)** is a separate
+tool for a separate problem, worth knowing about if your displays differ in
+pixel density: it is about where the pointer lands *physically* when it
+crosses between displays, rather than at the matching pixel row. It runs on
+Windows, and its newer Linux backend is developed on KDE Plasma 6 Wayland.
+
+### What Windows 11 itself does
+
+Microsoft calls it *Ease cursor movement between displays* — Settings → System
+→ Display → Multiple displays, since build 22557, stored as
+`CursorDeadzoneJumpingSetting` under `HKCU\Control Panel\Cursors`
+([elevenforum](https://www.elevenforum.com/t/turn-on-or-off-ease-cursor-movement-between-displays-in-windows-11.4873/)).
+The internal name is the honest description of the mechanism: deadzone
+jumping.
+
+It is one checkbox with nothing to tune, and it draws the complaint you would
+expect of a jump with no push threshold in front of it: people whose monitors
+do not line up report the pointer teleporting to the corner of the display
+above when they merely touch the top edge, and go looking for the switch
+([Microsoft Community
+Hub](https://techcommunity.microsoft.com/discussions/windowsinsiderprogram/windows-11-multi-monitor-issue---cursor-jumps-to-closest-corner-of-above-monitor/3699709)).
+Worth knowing before treating it as the reference behaviour to copy.
 
 ## Licence
 

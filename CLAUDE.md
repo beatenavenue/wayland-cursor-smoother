@@ -19,9 +19,15 @@ Guidance for Claude Code (and humans) working in this repository.
 
 ## Project status
 
-**It works, and it is in use.** `bin/wcsd` runs as a daemon and redirects the
-pointer out of the dead bands in the author's layout. Built and confirmed on
-hardware on 2026-09-21: Plasma 6.3.6 / KWin 6.3.6, Debian 13, kernel 6.12.
+**It works, it is in use, and development is closed for now.** `bin/wcsd`
+runs as a systemd user service and redirects the pointer out of the dead bands
+in the author's layout. Built and confirmed on hardware on 2026-09-21: Plasma
+6.3.6 / KWin 6.3.6, Debian 13, kernel 6.12.
+
+The author's own summary: *not entirely ideal, but quite practical for
+something one person built.* See "Closed, 2026-09-21", at the end of this
+file, for what was confirmed on hardware last and what was deliberately left
+alone.
 
 > [!IMPORTANT]
 > **This file is a record of how that happened, not a description of what
@@ -48,18 +54,22 @@ one of the explanations this file first offered for it was itself wrong.
 |---|---|
 | What exists and how to run it | `README.md` |
 | Why each approach was rejected | "Verified platform constraints", below |
-| What the author decided, and why | "Settled decisions" parts 1 and 2, and decision 8 |
+| What the author decided, and why | "Settled decisions" parts 1 and 2, and decisions 8 to 11 |
 | What was measured on hardware | the dated probe-result sections |
 | Claims that turned out wrong | every section headed **Correction** |
 
 ### What is still open
 
-- **Mixed-DPI is untested.** Every display on this desk reports `Scale: 1`, so
-  logical and physical pixels coincide here. The code works in KWin's logical
-  coordinates throughout, which should be correct, but "should" is not a test.
-- **The feel is not settled.** The author reports it differs from Windows in
-  some way not yet pinned down. `threshold`, `style` and `duration` are the
-  knobs; which one is responsible has not been established.
+Very little, and nothing that blocks use. Everything that was once listed
+here as unverified has now run on the author's hardware — see "Closed,
+2026-09-21".
+
+- **The undo leaves a residual oddity.** It works and is practical, and the
+  author still notices something slightly off about it. What that something is
+  has not been pinned down; two candidates were named in advance and neither
+  has been ruled in. See "Closed, 2026-09-21".
+- **Mixed-DPI is out of scope, not open.** See settled decision 11 — do not
+  raise it as unfinished business.
 - **A stale `Cursor Feed 1.0` KWin script package** is installed on the
   author's machine from the original attempt. It is disabled and unrelated to
   anything here — the daemon loads its feed from a temp file and never
@@ -480,6 +490,11 @@ session. Decision 4 rules that out. Do not propose it again.
 
 - Development happens on a feature branch, never directly on `main`.
 - `README.md` is written in English. Keep it that way.
+- **Shell blocks in `README.md` are ```` ```bash ```` and carry no `$` prompt.**
+  The author's objection, and it is right: every command there exists to be
+  copied, and a prompt character is something the reader has to delete by hand
+  or, worse, pastes by accident. Keep output out of those blocks too — a block
+  the reader can select whole and run is the point.
 - When recording a platform constraint here, cite the file it came from and note
   that it was read from `master`, so a later reader knows to re-verify.
 - **Before writing a finding here, ask whether it should survive this file's
@@ -1436,3 +1451,468 @@ it. Read the evidence that already exists before generating more.
 `BusName` and a default path that writes into the checkout are both invisible
 at runtime. `tests/test_source_guards.py` reads source rather than behaviour,
 which is worth doing exactly this rarely.
+
+## Settled decision 9 — a tray-resident front end is rejected, 2026-09-21
+
+The author raised their own `dimmgr` (a PyQt5 `QSystemTrayIcon` front end for
+PowerDevil's display timeout) as a model for making this daemon's residency
+visible, and then withdrew it: *the state being visible is nice, but it only
+adds clutter.* Treat that as closed.
+
+Recorded because the reasoning was not only taste, and a later session may be
+tempted by the same idea:
+
+- **Merging the GUI into the daemon costs the proven configuration.** The
+  daemon is built on `DBusGMainLoop` + `GLib.MainLoop` + `GLib.unix_signal_add`
+  + GLib fd watches, and its D-Bus receiving object is literally the shape
+  `probe_dbus_link.py` proved on hardware. A Qt main loop means rewriting that
+  half, against this file's own lesson about never running a configuration
+  different from the one that was tested.
+- **It also weakens decision 4's separation.** A tray bug would take the
+  redirect down with it.
+- **A tray as a separate controller** (the shape `dimmgr` actually has --
+  presets, a restart item, a status icon, talking to something else that does
+  the work) has none of those problems and remains available: the daemon
+  already owns a bus name with a `Reload` method, so adding `Status`, `Pause`
+  and `SetStyle` would use the proven path. It is not wanted now.
+- Residency and the tray are orthogonal in any case. A tray app still has to
+  be started at login, so it is a front layer, not an autostart mechanism.
+
+## Running it with the session, 2026-09-21: generated, and UNVERIFIED
+
+> [!NOTE]
+> **Superseded: it has since been installed and runs well.** The reasoning
+> below stands; only the "never been run" framing is stale. See "Closed,
+> 2026-09-21".
+
+`wcsd --write-service` renders a systemd user unit for the checkout it is run
+from. **Nothing below has been run through systemd**: this was written in a
+container with no systemd user manager, no session bus and no KWin. What the
+tests pin is the shape of the file, not that it starts anything.
+
+### Why generate it rather than paste one into the README
+
+The README carried a unit with `%h/src/wayland-cursor-smoother/bin/wcsd` in it
+and a note to adjust the path. Two reasons that is the worse answer here, and
+both are the argument `--write-rule` already made for the udev rule:
+
+- **The paths are knowable.** `wcsd` knows where it is installed, which
+  interpreter is running it, and which of `qdbus`/`gdbus`/`busctl` exists. A
+  generated unit needs no editing, and editing is where a `%h` guess becomes a
+  unit that fails to load.
+- **Installables are not committed to the checkout.** The copy that takes
+  effect lives under `~/.config/systemd/user`; a second copy tracked in the
+  repository is exactly the "is this part of the project?" cost that commit
+  7a2eae9 removed. `--write-service` prints to stdout, like `--write-config`,
+  and writing a file stays an explicit choice.
+
+### The hazard the unit exists to guard
+
+`Daemon._load_script` logs a failure and carries on (`src/wcs/daemon.py`). That
+is right for a compositor that goes away mid-session — the daemon should not
+take itself down — but it means **a daemon started before KWin answers on the
+session bus runs perfectly and receives nothing.** Silence, again, and with no
+nonzero exit `Restart=on-failure` would not notice.
+
+`After=plasma-kwin_wayland.service` is expected to be sufficient on its own.
+That expectation is **not verified** — it rests on KWin's unit being
+`Type=notify`, which was not checked against the installed Plasma. So the unit
+also blocks on an `ExecStartPre` that polls KWin's `/Scripting` object until it
+answers, bounded by `timeout 30`. It asks with whichever tool
+`find_dbus_caller()` picks, so a machine where the gate passes is a machine
+where the script load will work.
+
+**The option not taken:** making the script load retry, or fail the process,
+inside the daemon. That is the fix with real teeth, and it is a change to how
+the daemon behaves when KWin restarts mid-session — a separate decision from
+how it is started, and not one to take while implementing an autostart unit.
+
+### Small things the unit settles
+
+- `ExecReload` sends `SIGHUP`, so `systemctl --user reload` re-reads the
+  layout without dropping the virtual pointer or the feed script. The signal
+  handler already existed; nothing but the unit was needed to expose it.
+- `RestartSec=5`, because a second copy started by hand exits 2 on the taken
+  bus name and would otherwise spin against the start limit.
+- No `%` specifier appears anywhere, and `tests/test_service.py` fails if one
+  does: every path is baked, so a `%` could only be a mistake, and an unknown
+  specifier makes systemd refuse the whole unit.
+
+## Prior art read, 2026-09-21: MouseUnSnag
+
+The author found <https://github.com/MouseUnSnag/MouseUnSnag> — a Windows 10
+tool, C#, MIT — that solves this project's problem, and asked what it does
+differently. Read at `master` on 2026-09-21. **It is not Windows 11's own
+*Ease cursor movement between displays***; it is a third-party tool aimed at
+the same defect, and it is the closest reference implementation available.
+
+### What it does, from the code
+
+`MouseHookHandler.LlMouseHookCallback` is the whole of the input side:
+
+```csharp
+var mouse = Win32Mouse.GetMouseLocation(lParam);
+if (!_cursorScreenBounds.Contains(mouse) && NativeMethods.GetCursorPos(out var cursor)
+    && _mouseLogic.HandleMouse(mouse, cursor, out var newCursor))
+{
+    Win32Mouse.SetCursorPos(newCursor);
+    return (IntPtr) 1;
+}
+```
+
+`mouse` is the position the mouse **asked** for — `WH_MOUSE_LL` runs before
+the clamp, so the hook sees intent. `cursor` is where the pointer actually is.
+`MouseLogic.HandleMouse` needs nothing else:
+
+```csharp
+var isStuck = (cursor != _lastMouse) && (mouseScreen != cursorScreen);
+```
+
+"The cursor is not where the previous event asked it to be, and the new ask is
+on a different screen (or on none)." **One event. No accumulator, no
+threshold, no window, no cooldown** — `grep` finds no timer and no hysteresis
+anywhere in the program, and `Options` is three booleans (`Unstick`, `Jump`,
+`Wrap`).
+
+The landing:
+
+```csharp
+newCursor = jumpScreen.Bounds.ClosestBoundaryPoint(cursor);
+```
+
+Clamp the cursor into the target rectangle — the same semantic as
+`redirect_target`, with an inset of zero. `DisplayList.JumpScreen` picks among
+the screens lying in the direction of travel the one nearest the *intended*
+point by Euclidean distance; `redirect_target` picks the one needing the
+smallest slide. Different spellings of "preserve the position along the edge".
+
+And `return (IntPtr) 1` **swallows the motion event**: the movement that
+caused the jump never reaches the system.
+
+### The five differences, and which are forced
+
+| | MouseUnSnag | wcsd | Forced? |
+|---|---|---|---|
+| Intent (pre-clamp position) | given, every event | not observable; reconstructed from device deltas | **Forced.** No Wayland client sees it |
+| The user's own motion | consumed (`return 1`) | cannot be removed; we only add events | **Forced.** A uinput device adds |
+| A position beyond every screen | Windows refuses; cursor stays put | KWin resolves it to the *nearest* output and clamps there | **Forced**, and it is the suspected cause of the bounce-back loop |
+| Trigger | one refused event | `threshold` device counts accumulated within `window` | **Chosen** |
+| Motion, and landing | instant `SetCursorPos`, onto the boundary | `glide` by default, `inset` px inside | **Chosen** |
+
+The first three explain why this project is shaped the way it is. **The last
+two are ours, and they are where the behaviour the author calls wrong is most
+likely to live.**
+
+`detect.py` justifies the threshold as avoiding a redirect when someone merely
+*reaches* for a display's edge. MouseUnSnag has no such guard and is reported
+to be pleasant to use, which is evidence — not proof — that the guard is
+costing more than it buys. The threshold is also exactly what makes a held
+TrackPoint loop: pressure keeps producing counts, so the accumulator refills
+about once a second, forever. A trigger that fires once per *refused motion*
+rather than once per *accumulated distance* has no such failure mode.
+
+Worth stating for the corner case that started this: at DP-3's bottom-right
+corner, pushing further down, MouseUnSnag would find **no screen in that
+direction** and simply do nothing — `ScreensInDirection` requires the
+candidate to lie in the direction of travel, and DP-4 lies to the *right* of
+DP-3, not below it. The cursor would rest against DP-3's bottom edge. There is
+nothing in its design that could hand the pointer back to the display it came
+from; that behaviour is KWin's nearest-output rule, which Windows does not
+have.
+
+### Two smaller notes
+
+- **MouseUnSnag never animates.** If "Windows-like feel" is the target, that
+  is a data point for `style = warp` over `glide`, and it bears on the open
+  question "the feel is not settled".
+- **It is a tray application** with its options persisted to
+  `%APPDATA%/MouseUnSnag/config.txt`. That is the shape settled decision 9
+  declined, and finding it here is not a reason to reopen it.
+
+## Prior art read, 2026-09-21 (second): Little Big Mouse, and a correction
+
+The author raised <https://github.com/mgth/LittleBigMouse> — Windows 10/11,
+C# + a Rust daemon, and **an experimental Linux port developed on KDE Plasma 6
+Wayland**. Read at `master` on 2026-09-21. It answers a question this file got
+wrong a few hours earlier.
+
+### Correction, 2026-09-21: "a uinput device can only add events" is NOT a forced constraint
+
+The MouseUnSnag comparison above lists, as **forced**:
+
+> | The user's own motion | consumed (`return 1`) | cannot be removed; we only add events | **Forced.** A uinput device adds |
+
+**That is wrong.** `rust/crates/lbm-hook/src/hook/linux/evdev/router.rs`:
+
+```rust
+//! From the first `EVIOCGRAB` the physical mice deliver ONLY to this process
+```
+
+`EVIOCGRAB` takes the device away from everyone else, including the
+compositor. LBM grabs the physical mice, and re-injects a corrected stream
+through its own uinput device. So the user's motion *can* be removed on
+Wayland; this project simply does not do it.
+
+The price is stated plainly by their code and README, and it is not small:
+
+- once grabbed, **you are the pointer driver**. LBM re-implements pointer
+  acceleration itself, reading `kcminputrc` per device
+  (`hook/linux/accel.rs`), and carries a second virtual *keyboard* for the
+  key usages of combined mouse/keyboard receiver nodes;
+- their README asks for `input` group membership, which is settled decision 5.
+  Whether the `uaccess` ACL this project already installs is enough for
+  `EVIOCGRAB` was **not checked** — it is a question, not a blocker;
+- a bug now stops the mouse working at all, rather than failing to help.
+
+The rest of that table stands. This row does not.
+
+### What LBM actually does, from the code
+
+Not "detect stuck, then jump". It owns movement, over a layout in millimetres:
+
+- `lbm-layout/src/zoning/mod.rs::compute_links` cuts each edge at every
+  coordinate where any other zone starts or ends (and at user-drawn section
+  boundaries), then for each interval picks the nearest zone *beyond* that
+  edge which **fully covers the interval**. An interval no zone covers gets
+  `target: None` — **a wall**.
+- `lbm-engine/src/lib.rs::find_target_zone` casts the movement vector and
+  takes the zone whose border it crosses at the shortest travel;
+  `NoZoneMatches` clips the cursor back into the current zone.
+- Each interval carries `border_resistance` and `border_resistance_px` as
+  `[move, drag]` pairs, plus `move_block`/`drag_block`. **Resistance per
+  stretch of edge, and a different value while dragging a window.**
+
+**So LBM does not solve this project's problem out of the box**: a dead band
+is a wall, and the pointer stops there. What it solves is *where* a crossing
+lands. Two things are still worth taking from it.
+
+**Per-section, per-mode resistance.** The author's objection to loosening
+`threshold` is a real defect this project shares with MouseUnSnag: reaching
+for a window's edge inside a dead band can fling the pointer to another
+display. LBM's answer is not one global threshold but resistance drawn onto
+the stretch of edge that needs it, with a separate value for dragging.
+
+**The continuous model itself.** With the device grabbed, there is no trigger
+to tune, so there is no false trigger, and a crossing is reversible — moving
+back takes you back. That is much closer to what the author describes missing
+("coming back is oddly smooth") than anything a jump can do. It is also
+exactly what a layout with no gaps would give: if every stretch of edge maps
+somewhere, nothing is ever stuck and nothing ever teleports. LBM can be made
+gap-free by adjusting relative display sizes in its UI, at the cost of a
+crossing that is proportional rather than position-preserving — which is a
+different semantic from the Goal section above, and a deliberate choice, not
+a bug.
+
+### What Windows 11 does, and what it does not
+
+Searched 2026-09-21. The feature is *Ease cursor movement between displays*,
+Settings -> System -> Display -> Multiple displays, since build 22557, stored
+as `CursorDeadzoneJumpingSetting` in `HKCU\Control Panel\Cursors`. Microsoft's
+own name for the mechanism is therefore **deadzone jumping**.
+
+**It is the same family as this project, and it draws the same complaint.**
+Users with misaligned monitors report the pointer teleporting to the corner of
+the display above when they merely touch the top edge, and go looking for the
+toggle. So "Windows 11 never does this to me" is not evidence that Windows has
+a better mechanism; the symptom is documented on Windows too. What Windows
+does *not* have is any tuning: one checkbox, no threshold, no style.
+
+**A caution for a later session.** The search turns up US12124757, *Movement
+of cursor between displays based on motion vectors*, which describes choosing
+the destination display by the direction of travel. It is tempting to read it
+as Microsoft's implementation. **It is not: the assignee is Lenovo**, filed
+2022-07-26, granted 2024-10-22. Do not cite it as what Windows does.
+
+## Settled decision 10 — the user feels the hand, not the pointer (2026-09-21)
+
+The author's ruling, and it is the premise the rest of this file should have
+been reasoned from. Recorded close to verbatim, because paraphrasing it loses
+the part that matters.
+
+> As a first premise, the user **does not look at the mouse cursor much**, and
+> **frequently loses it**. People need countermeasures to find a lost cursor:
+> an eyeball widget that follows it, the Ctrl-key ripple, shaking it to make
+> it briefly huge.
+>
+> What the user feels at all times is **the amount of motion in their hand**,
+> not the pointer's position on screen. That is exactly why a dead zone —
+> where the hand moves and the pointer does not appear where it is expected —
+> is stressful, and that is this project's motivation itself.
+
+Three consequences, as the author stated them:
+
+1. **The discomfort is "having discovered the deviation, being unable to
+   return with an equal amount of motion".** It is *not* "losing sight of the
+   pointer".
+2. **No `landing` setting is needed. Only warp needs a remedy.**
+3. **Only warp needs a way back.** A glide has already returned by the same
+   amount of motion it took to slide in.
+
+### Correction, 2026-09-21: the axis is reciprocity, not information
+
+Earlier this session I argued the glide/warp split this way:
+
+> **glide is a claim about how the pointer moved** — the animation draws the
+> path, so the path must be a motion someone made. **warp is a function** —
+> no path, so all that exists is the mapping, and a mapping wants to be
+> invertible.
+
+That is not wrong as far as it goes, and it is **the wrong axis**. It treats
+the difference as *information* — the glide shows you where it went, the warp
+does not — and therefore frames the warp's problem as disorientation. The
+author's answer is that disorientation is not the complaint, because the
+pointer is barely watched in either mode. The complaint is that **the hand
+pushed one way and cannot undo it by pushing the same amount back**. A warp
+leaves the hand holding a displacement it never made.
+
+Reasoning from the screen rather than from the hand is the same mistake this
+project exists to correct, and I made it while designing the fix for it.
+
+### The reciprocal mapping is recorded, and not taken
+
+The idea that reached this decision was the author's: a dead band should map
+onto a *range* on the neighbour rather than a single point, and the range
+should map back. Worked through, the return leg forces the target to be a
+dead edge of the neighbour (nowhere else can a push be refused, so nowhere
+else can a return be triggered), which makes the mapping "unroll the corner":
+depth past the neighbour's extent becomes distance from the shared corner.
+For this desk it fits — all four reciprocal ranges land inside the neighbour,
+and the four edges they need (DP-3's top and bottom, DP-1's top and bottom)
+are walls today, so nothing existing is overridden.
+
+It is **not being implemented**, for two reasons:
+
+- under `glide` it would animate a path nobody travelled (out of the band, up
+  570px, across, then 568px back along the neighbour's bottom edge — roughly
+  double today's journey);
+- it returns the pointer to the *corresponding* point, whereas an undo
+  returns it to the *exact* point, which is what "an equal push back" means.
+
+Worth keeping because it is the right shape for a different goal: it makes the
+layout gap-free rather than making a jump reversible.
+
+## The undo, 2026-09-21: symmetry as the whole design
+
+> [!NOTE]
+> **Superseded in part: it has since run on hardware and is in use.** The
+> "what is not verified" section at the end is the stale part. See "Closed,
+> 2026-09-21".
+
+`UndoLatch` in `src/wcs/detect.py`, wired in `daemon.py`, off in glide.
+
+**The same `threshold` buys the redirect and buys it back.** No second number:
+"an equal push the other way" is the requirement, so a separate
+`undo_threshold` would be a different feature wearing this one's name. The
+gesture is its own inverse and there is nothing new to learn.
+
+What the latch is, precisely:
+
+- armed at each warp with the source position and the push direction;
+- accumulates the *reverse* component of device motion, using the same
+  `outward_component` negated, so motion along the edge still counts for
+  nothing and a wobble outward drains it rather than being ignored;
+- fires once, warping back to the exact source, and disarms;
+- expires after `undo_window` (default 3s) — long enough to notice, short
+  enough that a push a minute later is a new intention;
+- **disarms on a button press.** Clicking means the user meant to be there,
+  and taking back a position they have already acted on would be worse than
+  not offering the undo at all.
+
+### Two things that could have gone silently wrong
+
+**A setting that does nothing.** `undo_window` is inert under `glide`, which
+is exactly the failure decision 8's validation section is about. Both
+`--check` and the daemon's startup say so in as many words —
+`undo: 3s, but INACTIVE -- it takes a warp back and style is glide` — rather
+than leaving the reader to discover it.
+
+**Spelling "off" two ways.** `--undo-window 0` and `undo_window = off` have to
+mean the same thing, so zero maps to `None` in `_validate` rather than being
+refused by the range check. This is the same trap as `--threshold 0`, which
+was once accepted on the command line while `threshold = 0` was refused.
+
+### What is not verified
+
+The unit tests pin the gesture's arithmetic and nothing else. **No warp has
+been taken back on hardware.** Two things to watch for on the first run:
+
+- the reverse push moves the pointer before it fires, because we cannot
+  consume input — so the pointer visibly travels one way and then snaps back.
+  Whether that reads as a correction or as a second surprise is a question for
+  the eye, not the tests;
+- a held TrackPoint pushed back and forth could ping-pong between a redirect
+  and its undo. The cooldown guards one direction and `undo_window` the
+  other, but the pairing has never been exercised.
+
+## Settled decision 11 — mixed-DPI is out of scope (2026-09-21)
+
+The author's ruling: **not needed, outside my interest.**
+
+This file listed "mixed-DPI is untested" as open from the first session
+onward, and it was never a defect — only an untested assumption. Every display
+on this desk reports `Scale: 1`, the code works in KWin's logical coordinates
+throughout, and the author has no scaled display and no plan to add one.
+
+So it is closed rather than pending. **Do not raise it as unfinished
+business.** `README.md` still says mixed-DPI layouts are untested, which is
+true and is the right thing to tell a stranger; that is a statement of fact,
+not a task.
+
+## Closed, 2026-09-21: the last three unknowns, answered on hardware
+
+The author ran what was left and reported back. All three items that this file
+carried as unverified are now settled, and development is closed for now.
+
+| | Result |
+|---|---|
+| The systemd user unit | **Installed and running. Works well.** |
+| The undo (taking a warp back) | **Works. Slightly odd still, but practical.** |
+| Mixed-DPI | **Not investigated, and not going to be** — settled decision 11 |
+
+### The unit needed nothing
+
+It was written in a container with no systemd, no session bus and no KWin, and
+it started and ran on the first attempt on real hardware. Both guesses it was
+built on held: the ordering against KWin, and the `ExecStartPre` that waits
+for the scripting interface rather than trusting `After=` alone. Whether the
+gate was ever load-bearing is unknown and now unanswerable — nothing failed,
+which is the outcome it was there to produce.
+
+### The undo works, and something about it is still not right
+
+The author's report: it works and is practical, **and a slight oddity
+remains** — not enough to want it changed, not nothing either. What the
+oddity is has not been pinned down.
+
+Two candidates were named before the first run, and **neither has been ruled
+in or out**:
+
+- the reverse push moves the pointer before the undo fires, because this
+  project cannot consume input, so the pointer visibly travels one way and
+  then snaps back. Whether that reads as a correction or as a second surprise
+  was always a question for the eye;
+- the same-`threshold` symmetry may simply be more motion than a correction
+  wants. Asymmetry — a lighter push to undo than to fire — is the obvious
+  thing to try, and was deliberately not built, because "an equal push the
+  other way" is what settled decision 10 asked for.
+
+If this is ever picked up again, that is the place to start, and the honest
+first step is to find out which of the two it is rather than changing both.
+
+### Where "the feel is not settled" went
+
+That item sat in the open list from the first working build, saying only that
+the author found it different from Windows in some way not yet pinned down.
+**It is not dropped, it is answered**, and the answer took most of a session:
+the difference was never the animation or the threshold. It was that a warp
+goes one way and the hand cannot take it back — settled decision 10, and the
+undo built from it. What is left of it is the residual oddity above, which is
+a much smaller and much better specified thing than the item it replaces.
+
+### What this file is now for
+
+Everything it records has either shipped, been ruled out, or been recorded as
+a correction. It has done its job, and the author intends to delete it before
+any public release — the note at the top still applies. `README.md` stands on
+its own and does not reference this file, so deleting it breaks nothing.
+

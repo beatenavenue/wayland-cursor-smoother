@@ -11,8 +11,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from wcs.detect import PushDetector, outward_component  # noqa: E402
-from wcs.geometry import Direction  # noqa: E402
+from wcs.detect import PushDetector, UndoLatch, outward_component  # noqa: E402
+from wcs.geometry import Direction, Point  # noqa: E402
 
 
 class OutwardComponentTest(unittest.TestCase):
@@ -251,3 +251,102 @@ class RealisticBatchTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class UndoLatchTest(unittest.TestCase):
+    """Taking a warp back.
+
+    The requirement is stated in terms of the hand, not the screen: having
+    discovered the pointer somewhere it did not expect to be, an equal push
+    the other way must put it back. So the tests are about how much motion
+    the gesture costs and when it stops being available -- never about where
+    the pointer is, which is the thing the user is not watching.
+    """
+
+    SOURCE = Point(1920, 2159)
+
+    def setUp(self):
+        self.latch = UndoLatch(threshold=100.0, window=0.3, lifetime=3.0)
+
+    def back(self, count, amount=10, step=0.01):
+        """Feed ``count`` rightward events; return what the latch returned."""
+        out = []
+        for _ in range(count):
+            self.now += step
+            result = self.latch.motion(amount, 0, self.now)
+            if result is not None:
+                out.append(result)
+        return out
+
+    now = 0.0
+
+    def test_an_unarmed_latch_never_fires(self):
+        self.now = 0.0
+        self.assertEqual(self.back(100), [])
+
+    def test_the_same_push_back_takes_it_back(self):
+        # 100 counts bought the redirect; 100 counts buy it back. The
+        # symmetry is the design: the gesture is its own inverse.
+        self.now = 0.0
+        self.latch.arm(self.SOURCE, Direction.LEFT, self.now)
+        self.assertEqual(self.back(9), [])
+        self.assertEqual(self.back(1), [self.SOURCE])
+
+    def test_it_fires_once(self):
+        self.now = 0.0
+        self.latch.arm(self.SOURCE, Direction.LEFT, self.now)
+        self.assertEqual(len(self.back(30)), 1)
+        self.assertFalse(self.latch.armed)
+
+    def test_pushing_the_way_the_redirect_went_is_not_a_correction(self):
+        self.now = 0.0
+        self.latch.arm(self.SOURCE, Direction.LEFT, self.now)
+        self.assertEqual(self.back(20, amount=-10), [])
+
+    def test_a_wobble_outward_drains_the_correction(self):
+        self.now = 0.0
+        self.latch.arm(self.SOURCE, Direction.LEFT, self.now)
+        self.back(5)                      # 50 back
+        self.assertEqual(self.back(5, amount=-10), [])   # and 50 outward again
+        self.assertEqual(self.back(9), [])               # so 90 is not enough
+        self.assertEqual(self.back(1), [self.SOURCE])
+
+    def test_motion_along_the_edge_counts_for_nothing(self):
+        self.now = 0.0
+        self.latch.arm(self.SOURCE, Direction.LEFT, self.now)
+        for _ in range(50):
+            self.now += 0.01
+            self.assertIsNone(self.latch.motion(0, 30, self.now))
+
+    def test_a_pause_longer_than_the_window_forgets_the_correction(self):
+        self.now = 0.0
+        self.latch.arm(self.SOURCE, Direction.LEFT, self.now)
+        self.back(9)
+        self.now += 0.5                   # longer than window
+        self.assertEqual(self.back(9), [])
+        self.assertEqual(self.back(1), [self.SOURCE])
+
+    def test_it_expires(self):
+        # A push a minute later is a new intention, not a correction.
+        self.now = 0.0
+        self.latch.arm(self.SOURCE, Direction.LEFT, self.now)
+        self.now = 5.0
+        self.assertEqual(self.back(30), [])
+        self.assertFalse(self.latch.armed)
+
+    def test_a_click_settles_the_matter(self):
+        # Acting at the new position means the user meant to be there.
+        self.now = 0.0
+        self.latch.arm(self.SOURCE, Direction.LEFT, self.now)
+        self.latch.disarm()
+        self.assertEqual(self.back(30), [])
+
+    def test_each_direction_has_its_own_way_back(self):
+        for direction, dx, dy in ((Direction.LEFT, 10, 0),
+                                  (Direction.RIGHT, -10, 0),
+                                  (Direction.UP, 0, 10),
+                                  (Direction.DOWN, 0, -10)):
+            latch = UndoLatch(threshold=100.0, window=0.3, lifetime=3.0)
+            latch.arm(self.SOURCE, direction, 0.0)
+            results = [latch.motion(dx, dy, 0.01 * i) for i in range(1, 11)]
+            self.assertEqual(results[-1], self.SOURCE, direction)

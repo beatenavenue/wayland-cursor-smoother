@@ -51,6 +51,9 @@ class DetectConfig:
     threshold: float = 100.0
     window: float = 0.3
     cooldown: float = 0.5
+    #: Seconds a warp stays undoable; ``None`` switches undo off. Only warps
+    #: are undoable -- see `UndoLatch` for why a glide needs nothing.
+    undo_window: Optional[float] = 3.0
 
 
 @dataclass(frozen=True)
@@ -75,6 +78,8 @@ _FIELDS = {
         "threshold": ("float", lambda v: v > 0, "must be greater than 0"),
         "window": ("float", lambda v: v > 0, "must be greater than 0"),
         "cooldown": ("float", lambda v: v >= 0, "must not be negative"),
+        "undo_window": ("optional_seconds", lambda v: v > 0,
+                        "must be greater than 0, or off"),
     },
     "redirect": {
         "style": ("style", None, None),
@@ -104,8 +109,16 @@ def _validate(section: str, key: str, value):
                 f"[{section}] {key}: {value!r} is not one of {', '.join(STYLES)}"
             )
         return value
-    if kind == "optional_float" and value is None:
+    if kind in ("optional_float", "optional_seconds") and value is None:
         return None
+    if kind == "optional_seconds":
+        # `--undo-window 0` and `undo_window = off` have to mean the same
+        # thing, so zero is spelled here rather than refused by the range.
+        try:
+            if float(value) == 0.0:
+                return None
+        except (TypeError, ValueError):
+            pass
 
     # Coerce as well as check, so a value means the same thing whichever way
     # it arrived. Without this a flag stores an int where the file stores a
@@ -135,6 +148,9 @@ def _convert(section: str, key: str, raw: str):
         return _validate(section, key, text)
 
     if kind == "optional_float" and text in ("", "none", "off", "unlimited"):
+        return None
+
+    if kind == "optional_seconds" and text in ("", "none", "off"):
         return None
 
     try:
@@ -229,6 +245,18 @@ window = {d.window:g}
 
 # Seconds after a redirect during which another cannot fire.
 cooldown = {d.cooldown:g}
+
+# Seconds during which a warp can be taken back by pushing `threshold` the
+# other way. What you feel while using a pointer is how far your hand moved,
+# not where the pointer is -- so when a warp puts it somewhere unexpected, the
+# correction you reach for is pushing back the same amount. Without this the
+# pointer does not come back: the way home is a detour around the edge the
+# redirect slid along.
+#
+# `off` (or 0) disables it. **It applies to style = warp only.** A glide has
+# already shown you the way back, and retracing it costs the same motion it
+# cost to arrive, so there is nothing to undo.
+undo_window = {"off" if d.undo_window is None else format(d.undo_window, "g")}
 
 [redirect]
 # glide -- the pointer travels to its new position over `duration` seconds.

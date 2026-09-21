@@ -113,3 +113,10 @@ class NoWritingIntoTheCheckoutTest(unittest.TestCase):
         # explicit choice, which is the same principle from the other side.
         source = (ROOT / "bin" / "wcsd").read_text()
         self.assertIn('"--write-config", nargs="?", const="-"', source)
+
+    def test_the_unit_default_goes_to_stdout_too(self):
+        # Same principle again: --write-service prints, and installing the
+        # unit under ~/.config/systemd/user is the reader's decision, not a
+        # side effect of asking what it would contain.
+        source = (ROOT / "bin" / "wcsd").read_text()
+        self.assertIn('"--write-service", nargs="?", const="-"', source)

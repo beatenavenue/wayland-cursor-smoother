@@ -8,7 +8,8 @@ stretch of display edge with nothing behind it.
 
     wcsd                     # run it
     wcsd --check             # report what it would do, and change nothing
-    wcsd --write-config      # write a documented config file
+    wcsd --write-config      # print a documented config file
+    wcsd --write-service     # print a systemd user unit for this checkout
     wcsd --style warp        # override a setting for this run
 
 Settings live in $XDG_CONFIG_HOME/wayland-cursor-smoother.conf; see
@@ -18,6 +19,7 @@ Settings live in $XDG_CONFIG_HOME/wayland-cursor-smoother.conf; see
 from __future__ import annotations
 
 import argparse
+import shutil
 import sys
 from pathlib import Path
 
@@ -25,6 +27,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from wcs.config import (
     STYLES,
+    WARP,
     ConfigError,
     config_path,
     default_config_text,
@@ -34,7 +37,14 @@ from wcs.config import (
 from wcs.daemon import DEVICE_NAME, FEED_MARKER, PLUGIN_NAME, Daemon, log
 from wcs.evdev import list_devices
 from wcs.feed import watch_bands
+from wcs.kwinscript import find_dbus_caller
 from wcs.layout import LayoutError, detect_layout
+from wcs.service import (
+    default_unit_path,
+    install_commands,
+    readiness_command,
+    service_text,
+)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -46,6 +56,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--write-config", nargs="?", const="-", metavar="PATH",
                         help="write a documented config file and exit; "
                              "'-' or no argument writes to stdout")
+    parser.add_argument("--write-service", nargs="?", const="-", metavar="PATH",
+                        help="write a systemd user unit that runs this "
+                             "checkout and exit; '-' or no argument writes to "
+                             f"stdout (installed at {default_unit_path()})")
     parser.add_argument("--check", action="store_true",
                         help="report the layout, the bands and the devices, "
                              "then exit without touching anything")
@@ -64,6 +78,11 @@ def build_parser() -> argparse.ArgumentParser:
                         help="seconds before a part-finished push is forgotten")
     detect.add_argument("--cooldown", type=float,
                         help="seconds after a redirect before another can fire")
+    detect.add_argument("--undo-window", type=float, dest="undo_window",
+                        metavar="SECONDS",
+                        help="seconds a warp can be taken back by pushing the "
+                             "same amount the other way; 0 switches it off "
+                             "(style=warp only)")
 
     redirect = parser.add_argument_group("redirect (overrides the config file)")
     redirect.add_argument("--style", choices=STYLES,
@@ -84,6 +103,15 @@ def report(config, verbose: bool) -> int:
           f"{'' if config_path().exists() else '  (absent; using defaults)'}")
     print(f"detect      : threshold={config.detect.threshold:g} "
           f"window={config.detect.window:g} cooldown={config.detect.cooldown:g}")
+    if not config.detect.undo_window:
+        undo = "off"
+    elif config.redirect.style != WARP:
+        undo = (f"{config.detect.undo_window:g}s, but INACTIVE -- it takes a "
+                f"warp back and style is {config.redirect.style}")
+    else:
+        undo = (f"{config.detect.undo_window:g}s; push "
+                f"{config.detect.threshold:g} back to take a warp back")
+    print(f"undo        : {undo}")
     print(f"redirect    : style={config.redirect.style} "
           f"duration={config.redirect.duration:g} rate={config.redirect.rate:g} "
           f"inset={config.redirect.inset} max_slide={config.redirect.max_slide}")
@@ -286,10 +314,29 @@ def main() -> int:
             print(f"wrote {path}")
         return 0
 
+    if args.write_service is not None:
+        caller = find_dbus_caller()
+        text = service_text(
+            [sys.executable, str(Path(__file__).resolve())],
+            ready=readiness_command(shutil.which(caller.program) if caller else None),
+        )
+        if args.write_service == "-":
+            sys.stdout.write(text)
+        else:
+            path = Path(args.write_service)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text(text)
+            print(f"wrote {path}")
+            print("Then:")
+            for command in install_commands(path):
+                print(f"  {command}")
+        return 0
+
     try:
         config = with_overrides(
             load_config(args.config),
             threshold=args.threshold, window=args.window, cooldown=args.cooldown,
+            undo_window=args.undo_window,
             style=args.style, duration=args.duration, rate=args.rate,
             inset=args.inset, max_slide=args.max_slide,
         )

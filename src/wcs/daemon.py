@@ -28,11 +28,12 @@ from pathlib import Path
 from typing import Optional
 
 from .config import WARP, Config
-from .detect import PushDetector
+from .detect import PushDetector, UndoLatch
 from .evdev import (
     ABS_X,
     ABS_Y,
     EV_ABS,
+    EV_KEY,
     EV_REL,
     REL_X,
     REL_Y,
@@ -81,6 +82,16 @@ class Daemon:
             window=config.detect.window,
             cooldown=config.detect.cooldown,
         )
+        #: Armed after a warp only. A glide has already shown the way back
+        #: and costs the same motion to retrace; a warp leaves the hand
+        #: holding a displacement it never made. See UndoLatch.
+        self._undo = (
+            UndoLatch(threshold=config.detect.threshold,
+                      window=config.detect.window,
+                      lifetime=config.detect.undo_window)
+            if config.detect.undo_window and config.redirect.style == WARP
+            else None
+        )
         self._armed: Optional[WatchBand] = None
         self._position = Point(0.0, 0.0)
         self._devices: dict[int, InputDevice] = {}
@@ -88,6 +99,7 @@ class Daemon:
         self._script_path: Optional[Path] = None
         self._caller = find_dbus_caller()
         self._redirects = 0
+        self._undos = 0
         self._edges = 0
         self._bus_name = None  # must outlive the loop; see run()
         self._feed_object = None
@@ -155,6 +167,12 @@ class Daemon:
         GLib.unix_signal_add(GLib.PRIORITY_HIGH, signal.SIGHUP,
                              lambda: (log(self.reload()), True)[1])
 
+        if self._undo is not None:
+            log(f"undo armed after each warp for {self._undo.lifetime:g}s; "
+                f"push {self._undo.threshold:g} back to take one")
+        elif self.config.detect.undo_window and self.config.redirect.style != WARP:
+            log("undo not applicable: it takes a warp back, and style is "
+                f"{self.config.redirect.style}")
         log("running; push against a dead edge to redirect")
         try:
             loop.run()
@@ -163,7 +181,8 @@ class Daemon:
         return 0
 
     def stop(self) -> None:
-        log(f"stopping after {self._edges} edge report(s) and {self._redirects} redirect(s)")
+        log(f"stopping after {self._edges} edge report(s), {self._redirects} "
+            f"redirect(s) and {self._undos} undo(s)")
         self._unload_script()
         for fd in list(self._devices):
             try:
@@ -226,6 +245,17 @@ class Daemon:
             self._script_path.unlink(missing_ok=True)
             self._script_path = None
 
+    def _take_back(self, source: Point) -> None:
+        """Put the pointer back where the warp took it from.
+
+        Always a warp, whatever else is configured: the latch is only armed
+        after one, and animating the way back would describe a journey the
+        pointer did not make on the way out either.
+        """
+        self.pointer.move_to(self.mapping, source.x, source.y)
+        self._undos += 1
+        log(f"undo {self._undos}: back to ({source.x:.0f},{source.y:.0f})")
+
     # -- devices -----------------------------------------------------------
 
     def _open_devices(self, GLib) -> None:
@@ -255,8 +285,14 @@ class Daemon:
             return False
 
         dx = dy = 0.0
+        pressed = False
         last_x, last_y = self._absolute[fd]
         for etype, code, value in decode_events(blob):
+            if etype == EV_KEY and value == 1:
+                # A button press means the user meant to be where they are.
+                # Undoing after a click would take back a position they have
+                # already acted on.
+                pressed = True
             if etype == EV_REL:
                 if code == REL_X:
                     dx += value
@@ -276,9 +312,17 @@ class Daemon:
                     last_y = value
         self._absolute[fd] = (last_x, last_y)
 
+        if pressed and self._undo is not None:
+            self._undo.disarm()
+
         if dx or dy:
-            if self.detector.motion(dx, dy, time.monotonic()):
+            now = time.monotonic()
+            if self.detector.motion(dx, dy, now):
                 self._fire()
+            elif self._undo is not None:
+                source = self._undo.motion(dx, dy, now)
+                if source is not None:
+                    self._take_back(source)
         return True
 
     # -- the feed ----------------------------------------------------------
@@ -334,6 +378,9 @@ class Daemon:
                 rate=self.config.redirect.rate,
                 keep=self.layout.covers,
             )
+
+        if self._undo is not None:
+            self._undo.arm(self._position, band.direction, time.monotonic())
 
         self._redirects += 1
         log(f"redirect {self._redirects}: "
