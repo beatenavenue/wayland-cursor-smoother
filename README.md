@@ -355,6 +355,35 @@ Ideally none of this would be necessary and a compositor would simply do the
 right thing at a discontinuous layout. I would be glad to see this become
 redundant.
 
+## Prior art
+
+**[MouseUnSnag](https://github.com/MouseUnSnag/MouseUnSnag)** solves the same
+problem on Windows 10, and is worth reading before changing anything here.
+
+It hooks `WH_MOUSE_LL`, which hands it the position the mouse *asked* for
+before Windows clamps it. Comparing that against the actual cursor position
+tells it "the cursor did not go where the mouse pointed" from a single event —
+no threshold, no accumulator, no timing window. It then calls `SetCursorPos`
+and returns `1` from the hook, which **swallows** the motion that caused the
+jump.
+
+Neither of those is available here. A Wayland client cannot see the unclamped
+position, and a virtual input device can only add events, never remove the
+user's. Most of what this project does differently follows from those two
+facts.
+
+The two problems MouseUnSnag names, with the pictures that explain them better
+than prose can:
+
+- [How to disable sticky corners in Windows 10](https://superuser.com/questions/947817/how-to-disable-sticky-corners-in-windows-10)
+  — deliberate resistance at a corner. **Not this project's problem**; the KWin
+  equivalent is `CornerBarrier`, and removing resistance is not the same as
+  adding redirection.
+- [How to make the mouse wrap from corners when moving between monitors?](https://superuser.com/questions/865469/how-to-make-the-mouse-wrap-from-corners-when-moving-between-monitors)
+  — a stretch of edge with nothing behind it, because one display is taller
+  than its neighbour. **That one is this project's problem**, and the picture
+  there is the same shape as `img/motivation.png`.
+
 ## Licence
 
 See [LICENSE](LICENSE).

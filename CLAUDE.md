@@ -1526,3 +1526,94 @@ how it is started, and not one to take while implementing an autostart unit.
   does: every path is baked, so a `%` could only be a mistake, and an unknown
   specifier makes systemd refuse the whole unit.
 
+## Prior art read, 2026-09-21: MouseUnSnag
+
+The author found <https://github.com/MouseUnSnag/MouseUnSnag> — a Windows 10
+tool, C#, MIT — that solves this project's problem, and asked what it does
+differently. Read at `master` on 2026-09-21. **It is not Windows 11's own
+*Ease cursor movement between displays***; it is a third-party tool aimed at
+the same defect, and it is the closest reference implementation available.
+
+### What it does, from the code
+
+`MouseHookHandler.LlMouseHookCallback` is the whole of the input side:
+
+```csharp
+var mouse = Win32Mouse.GetMouseLocation(lParam);
+if (!_cursorScreenBounds.Contains(mouse) && NativeMethods.GetCursorPos(out var cursor)
+    && _mouseLogic.HandleMouse(mouse, cursor, out var newCursor))
+{
+    Win32Mouse.SetCursorPos(newCursor);
+    return (IntPtr) 1;
+}
+```
+
+`mouse` is the position the mouse **asked** for — `WH_MOUSE_LL` runs before
+the clamp, so the hook sees intent. `cursor` is where the pointer actually is.
+`MouseLogic.HandleMouse` needs nothing else:
+
+```csharp
+var isStuck = (cursor != _lastMouse) && (mouseScreen != cursorScreen);
+```
+
+"The cursor is not where the previous event asked it to be, and the new ask is
+on a different screen (or on none)." **One event. No accumulator, no
+threshold, no window, no cooldown** — `grep` finds no timer and no hysteresis
+anywhere in the program, and `Options` is three booleans (`Unstick`, `Jump`,
+`Wrap`).
+
+The landing:
+
+```csharp
+newCursor = jumpScreen.Bounds.ClosestBoundaryPoint(cursor);
+```
+
+Clamp the cursor into the target rectangle — the same semantic as
+`redirect_target`, with an inset of zero. `DisplayList.JumpScreen` picks among
+the screens lying in the direction of travel the one nearest the *intended*
+point by Euclidean distance; `redirect_target` picks the one needing the
+smallest slide. Different spellings of "preserve the position along the edge".
+
+And `return (IntPtr) 1` **swallows the motion event**: the movement that
+caused the jump never reaches the system.
+
+### The five differences, and which are forced
+
+| | MouseUnSnag | wcsd | Forced? |
+|---|---|---|---|
+| Intent (pre-clamp position) | given, every event | not observable; reconstructed from device deltas | **Forced.** No Wayland client sees it |
+| The user's own motion | consumed (`return 1`) | cannot be removed; we only add events | **Forced.** A uinput device adds |
+| A position beyond every screen | Windows refuses; cursor stays put | KWin resolves it to the *nearest* output and clamps there | **Forced**, and it is the suspected cause of the bounce-back loop |
+| Trigger | one refused event | `threshold` device counts accumulated within `window` | **Chosen** |
+| Motion, and landing | instant `SetCursorPos`, onto the boundary | `glide` by default, `inset` px inside | **Chosen** |
+
+The first three explain why this project is shaped the way it is. **The last
+two are ours, and they are where the behaviour the author calls wrong is most
+likely to live.**
+
+`detect.py` justifies the threshold as avoiding a redirect when someone merely
+*reaches* for a display's edge. MouseUnSnag has no such guard and is reported
+to be pleasant to use, which is evidence — not proof — that the guard is
+costing more than it buys. The threshold is also exactly what makes a held
+TrackPoint loop: pressure keeps producing counts, so the accumulator refills
+about once a second, forever. A trigger that fires once per *refused motion*
+rather than once per *accumulated distance* has no such failure mode.
+
+Worth stating for the corner case that started this: at DP-3's bottom-right
+corner, pushing further down, MouseUnSnag would find **no screen in that
+direction** and simply do nothing — `ScreensInDirection` requires the
+candidate to lie in the direction of travel, and DP-4 lies to the *right* of
+DP-3, not below it. The cursor would rest against DP-3's bottom edge. There is
+nothing in its design that could hand the pointer back to the display it came
+from; that behaviour is KWin's nearest-output rule, which Windows does not
+have.
+
+### Two smaller notes
+
+- **MouseUnSnag never animates.** If "Windows-like feel" is the target, that
+  is a data point for `style = warp` over `glide`, and it bears on the open
+  question "the feel is not settled".
+- **It is a tray application** with its options persisted to
+  `%APPDATA%/MouseUnSnag/config.txt`. That is the shape settled decision 9
+  declined, and finding it here is not a reason to reopen it.
+
