@@ -86,8 +86,8 @@ solves this.
 
 On Debian or Ubuntu the two Python bindings are:
 
-```console
-$ sudo apt install python3-dbus python3-gi
+```bash
+sudo apt install python3-dbus python3-gi
 ```
 
 If `./bin/wcsd --check` reports that `kscreen-doctor` is missing, install
@@ -101,8 +101,8 @@ whichever package your distribution ships KScreen's command line tool in.
 
 This changes nothing, creates no device and needs no permissions:
 
-```console
-$ ./bin/wcsd --check
+```bash
+./bin/wcsd --check
 ```
 
 It prints your layout, every stretch of edge with nothing behind it, where the
@@ -128,8 +128,8 @@ of *one* device sharing them — so such a rule hands over the keystrokes it was
 written to protect. Matching what udev has already classified each node as
 avoids that, and survives replacing the mouse:
 
-```console
-$ ./tools/probe_evdev_access.py --write-rule
+```bash
+./tools/probe_evdev_access.py --write-rule
 ```
 
 That prints the rule, writes it to a staging file and gives you the three
@@ -138,8 +138,8 @@ it grants anything at all. Re-run the probe afterwards: it checks two things,
 and the second matters more than the first — some pointing device must be
 readable, and **no keyboard may be**.
 
-```console
-$ ./tools/probe_evdev_access.py --watch 20
+```bash
+./tools/probe_evdev_access.py --watch 20
 ```
 
 Move every pointing device you own while that runs. Each should report a
@@ -147,8 +147,8 @@ non-zero count; one that stays silent cannot drive a push.
 
 ### 3. Run it
 
-```console
-$ ./bin/wcsd
+```bash
+./bin/wcsd
 ```
 
 Push into a dead edge and the pointer slides onto the neighbour. `--verbose`
@@ -159,12 +159,12 @@ logs each arm and disarm as well, which is what you want while tuning.
 A systemd user unit is generated for this checkout, with every path already
 filled in — there is nothing to edit:
 
-```console
-$ ./bin/wcsd --write-service                       # read it first
-$ ./bin/wcsd --write-service ~/.config/systemd/user/wayland-cursor-smoother.service
-$ systemctl --user daemon-reload
-$ systemctl --user enable --now wayland-cursor-smoother
-$ journalctl --user -u wayland-cursor-smoother -f
+```bash
+./bin/wcsd --write-service                       # read it first
+./bin/wcsd --write-service ~/.config/systemd/user/wayland-cursor-smoother.service
+systemctl --user daemon-reload
+systemctl --user enable --now wayland-cursor-smoother
+journalctl --user -u wayland-cursor-smoother -f
 ```
 
 Three things in the unit are worth knowing about:
@@ -186,18 +186,18 @@ Two things here are matters of taste and neither can be settled by argument,
 so both are settings: how hard you have to push, and whether the pointer
 jumps or travels.
 
-```console
-$ ./bin/wcsd --write-config ~/.config/wayland-cursor-smoother.conf
+```bash
+./bin/wcsd --write-config ~/.config/wayland-cursor-smoother.conf
 ```
 
 That writes a documented file holding exactly the built-in defaults, so a
 fresh copy changes nothing. Every value can also be given on the command line,
 which is much faster while you are finding what you like:
 
-```console
-$ ./bin/wcsd --verbose --threshold 50        # fire on a lighter push
-$ ./bin/wcsd --verbose --style warp          # jump instantly, as Windows does
-$ ./bin/wcsd --verbose --duration 0.15       # a slower glide
+```bash
+./bin/wcsd --verbose --threshold 50        # fire on a lighter push
+./bin/wcsd --verbose --style warp          # jump instantly, as Windows does
+./bin/wcsd --verbose --duration 0.15       # a slower glide
 ```
 
 | Setting | Default | What it changes |
@@ -279,13 +279,13 @@ pointer lands cannot drift between two languages.
 Every layer has a probe that answers one question and stops guessing at the
 next.
 
-```console
-$ ./bin/wcsd --check                    # layout, dead bands, readable devices
-$ ./bin/wcsd --diagnose                 # walk the chain, say which link is broken
-$ ./tools/probe_uinput.py               # can a virtual pointer reach every display?
-$ ./tools/probe_evdev_access.py         # what can be read, and what must not be
-$ ./tools/probe_kwin_feed.py            # can a KWin script read the pointer?
-$ ./tools/probe_dbus_link.py            # can that script call the daemon?
+```bash
+./bin/wcsd --check                    # layout, dead bands, readable devices
+./bin/wcsd --diagnose                 # walk the chain, say which link is broken
+./tools/probe_uinput.py               # can a virtual pointer reach every display?
+./tools/probe_evdev_access.py         # what can be read, and what must not be
+./tools/probe_kwin_feed.py            # can a KWin script read the pointer?
+./tools/probe_dbus_link.py            # can that script call the daemon?
 ```
 
 `--diagnose` is the one to reach for when the daemon starts cleanly and does
@@ -299,8 +299,8 @@ can watch the pointer stop at a dead edge and then slide onto the neighbour.
 
 ### Tests
 
-```console
-$ python3 -m unittest discover -s tests
+```bash
+python3 -m unittest discover -s tests
 ```
 
 Standard library only, no display needed. They cover the layout maths, the

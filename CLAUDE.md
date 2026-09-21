@@ -483,6 +483,11 @@ session. Decision 4 rules that out. Do not propose it again.
 
 - Development happens on a feature branch, never directly on `main`.
 - `README.md` is written in English. Keep it that way.
+- **Shell blocks in `README.md` are ```` ```bash ```` and carry no `$` prompt.**
+  The author's objection, and it is right: every command there exists to be
+  copied, and a prompt character is something the reader has to delete by hand
+  or, worse, pastes by accident. Keep output out of those blocks too — a block
+  the reader can select whole and run is the point.
 - When recording a platform constraint here, cite the file it came from and note
   that it was read from `master`, so a later reader knows to re-verify.
 - **Before writing a finding here, ask whether it should survive this file's
