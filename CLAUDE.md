@@ -1617,3 +1617,97 @@ have.
   `%APPDATA%/MouseUnSnag/config.txt`. That is the shape settled decision 9
   declined, and finding it here is not a reason to reopen it.
 
+## Prior art read, 2026-09-21 (second): Little Big Mouse, and a correction
+
+The author raised <https://github.com/mgth/LittleBigMouse> — Windows 10/11,
+C# + a Rust daemon, and **an experimental Linux port developed on KDE Plasma 6
+Wayland**. Read at `master` on 2026-09-21. It answers a question this file got
+wrong a few hours earlier.
+
+### Correction, 2026-09-21: "a uinput device can only add events" is NOT a forced constraint
+
+The MouseUnSnag comparison above lists, as **forced**:
+
+> | The user's own motion | consumed (`return 1`) | cannot be removed; we only add events | **Forced.** A uinput device adds |
+
+**That is wrong.** `rust/crates/lbm-hook/src/hook/linux/evdev/router.rs`:
+
+```rust
+//! From the first `EVIOCGRAB` the physical mice deliver ONLY to this process
+```
+
+`EVIOCGRAB` takes the device away from everyone else, including the
+compositor. LBM grabs the physical mice, and re-injects a corrected stream
+through its own uinput device. So the user's motion *can* be removed on
+Wayland; this project simply does not do it.
+
+The price is stated plainly by their code and README, and it is not small:
+
+- once grabbed, **you are the pointer driver**. LBM re-implements pointer
+  acceleration itself, reading `kcminputrc` per device
+  (`hook/linux/accel.rs`), and carries a second virtual *keyboard* for the
+  key usages of combined mouse/keyboard receiver nodes;
+- their README asks for `input` group membership, which is settled decision 5.
+  Whether the `uaccess` ACL this project already installs is enough for
+  `EVIOCGRAB` was **not checked** — it is a question, not a blocker;
+- a bug now stops the mouse working at all, rather than failing to help.
+
+The rest of that table stands. This row does not.
+
+### What LBM actually does, from the code
+
+Not "detect stuck, then jump". It owns movement, over a layout in millimetres:
+
+- `lbm-layout/src/zoning/mod.rs::compute_links` cuts each edge at every
+  coordinate where any other zone starts or ends (and at user-drawn section
+  boundaries), then for each interval picks the nearest zone *beyond* that
+  edge which **fully covers the interval**. An interval no zone covers gets
+  `target: None` — **a wall**.
+- `lbm-engine/src/lib.rs::find_target_zone` casts the movement vector and
+  takes the zone whose border it crosses at the shortest travel;
+  `NoZoneMatches` clips the cursor back into the current zone.
+- Each interval carries `border_resistance` and `border_resistance_px` as
+  `[move, drag]` pairs, plus `move_block`/`drag_block`. **Resistance per
+  stretch of edge, and a different value while dragging a window.**
+
+**So LBM does not solve this project's problem out of the box**: a dead band
+is a wall, and the pointer stops there. What it solves is *where* a crossing
+lands. Two things are still worth taking from it.
+
+**Per-section, per-mode resistance.** The author's objection to loosening
+`threshold` is a real defect this project shares with MouseUnSnag: reaching
+for a window's edge inside a dead band can fling the pointer to another
+display. LBM's answer is not one global threshold but resistance drawn onto
+the stretch of edge that needs it, with a separate value for dragging.
+
+**The continuous model itself.** With the device grabbed, there is no trigger
+to tune, so there is no false trigger, and a crossing is reversible — moving
+back takes you back. That is much closer to what the author describes missing
+("coming back is oddly smooth") than anything a jump can do. It is also
+exactly what a layout with no gaps would give: if every stretch of edge maps
+somewhere, nothing is ever stuck and nothing ever teleports. LBM can be made
+gap-free by adjusting relative display sizes in its UI, at the cost of a
+crossing that is proportional rather than position-preserving — which is a
+different semantic from the Goal section above, and a deliberate choice, not
+a bug.
+
+### What Windows 11 does, and what it does not
+
+Searched 2026-09-21. The feature is *Ease cursor movement between displays*,
+Settings -> System -> Display -> Multiple displays, since build 22557, stored
+as `CursorDeadzoneJumpingSetting` in `HKCU\Control Panel\Cursors`. Microsoft's
+own name for the mechanism is therefore **deadzone jumping**.
+
+**It is the same family as this project, and it draws the same complaint.**
+Users with misaligned monitors report the pointer teleporting to the corner of
+the display above when they merely touch the top edge, and go looking for the
+toggle. So "Windows 11 never does this to me" is not evidence that Windows has
+a better mechanism; the symptom is documented on Windows too. What Windows
+does *not* have is any tuning: one checkbox, no threshold, no style.
+
+**A caution for a later session.** The search turns up US12124757, *Movement
+of cursor between displays based on motion vectors*, which describes choosing
+the destination display by the direction of travel. It is tempting to read it
+as Microsoft's implementation. **It is not: the assignee is Lenovo**, filed
+2022-07-26, granted 2024-10-22. Do not cite it as what Windows does.
+

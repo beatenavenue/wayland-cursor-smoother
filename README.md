@@ -384,6 +384,50 @@ than prose can:
   than its neighbour. **That one is this project's problem**, and the picture
   there is the same shape as `img/motivation.png`.
 
+**[Little Big Mouse](https://github.com/mgth/LittleBigMouse)** takes a
+different route, and the difference is instructive.
+
+Rather than watching for a stuck pointer and jumping it, it *owns* pointer
+movement. Each display is a zone placed in millimetres; every edge is cut into
+sections; each section either links to the zone beyond it — position along the
+edge carried across — or is a **wall**. There is no trigger to tune because
+there is no jump: the pointer goes where the movement vector takes it, or it
+stops.
+
+Two things about it are worth knowing before borrowing anything:
+
+- **A stretch of edge with nothing behind it becomes a wall**, so out of the
+  box it does not do what this project does. What it fixes is *where* a
+  crossing lands: a 4K panel beside a 1080p one, crossed at the same physical
+  height instead of the same pixel row.
+- **Its Linux backend grabs the physical mice** (`EVIOCGRAB`) and re-injects a
+  corrected stream through `/dev/uinput`, re-implementing pointer acceleration
+  from `kcminputrc` along the way. That is what lets it be continuous where
+  this project is discrete — and it is the one thing this project's design
+  gives up by adding events rather than replacing them. It is developed on KDE
+  Plasma 6 Wayland, like this.
+
+Its own README warns that `littlebigmouse.com` is not the project and
+distributes malware; the project is on GitHub and at
+[littlebigmouse.mgth.fr](https://littlebigmouse.mgth.fr/).
+
+### What Windows 11 itself does
+
+Microsoft calls it *Ease cursor movement between displays* — Settings → System
+→ Display → Multiple displays, since build 22557, stored as
+`CursorDeadzoneJumpingSetting` under `HKCU\Control Panel\Cursors`
+([elevenforum](https://www.elevenforum.com/t/turn-on-or-off-ease-cursor-movement-between-displays-in-windows-11.4873/)).
+The internal name is the honest description of the mechanism: deadzone
+jumping.
+
+It is one checkbox with nothing to tune, and it draws the complaint you would
+expect of a jump with no push threshold in front of it: people whose monitors
+do not line up report the pointer teleporting to the corner of the display
+above when they merely touch the top edge, and go looking for the switch
+([Microsoft Community
+Hub](https://techcommunity.microsoft.com/discussions/windowsinsiderprogram/windows-11-multi-monitor-issue---cursor-jumps-to-closest-corner-of-above-monitor/3699709)).
+Worth knowing before treating it as the reference behaviour to copy.
+
 ## Licence
 
 See [LICENSE](LICENSE).
