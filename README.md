@@ -1,35 +1,52 @@
 # wayland-cursor-smoother
-KDE/Wayland Screen-Edge Cursor Smoother
 
-> [!WARNING]
-> **Status: WIP — nothing here has been confirmed on real hardware yet.**
->
-> There is no working tool. What exists is a problem statement, a record of
-> which approaches have been ruled out, the geometry that decides where the
-> pointer should land, and a probe that answers whether the one remaining
-> approach is possible on a given machine.
->
-> The findings are written to be useful on their own. If this project is never
-> finished, the section below on KWin's corner barrier should still save
-> somebody the day it cost me.
+Slide the pointer past the gaps in a non-rectangular multi-display layout, on
+KDE Plasma / Wayland.
 
-## Motivation
+If your monitors do not line up into a clean rectangle, there are stretches of
+screen edge with nothing behind them. The pointer reaches one of those and
+stops, and no amount of pushing moves it, because there is nowhere for it to
+go. This watches for that, and slides the pointer along the edge onto the
+nearest point of the neighbouring display — the same thing Windows 11 does
+under *Ease cursor movement between displays*.
+
+It runs entirely outside the compositor, so a bug here cannot take down your
+session.
+
+> [!NOTE]
+> **It works, and it has been used on exactly one machine.**
+>
+> Developed and run on Plasma 6.3.6 / KWin 6.3.6, Debian 13, kernel 6.12, with
+> three displays including a portrait one. Nothing here is version-locked on
+> purpose, but KWin's scripting API is not a stability promise, so treat a
+> Plasma upgrade as a reason to re-run the checks below rather than to assume.
+>
+> If it does not work on your setup, the diagnostics are built in and say
+> which link of the chain is broken. See [Troubleshooting](#troubleshooting).
 
 ![motivation](img/motivation.png)
 
-When building a multi-display setup, the usual best practice is to line up identical monitors so the overall desktop area forms a perfect rectangle, avoiding “dead corners” where the pointer cannot pass. In reality—because of desk space constraints, reuse of older hardware, and other reasons—complex, non-rectangular desktop geometries are sometimes unavoidable.
+---
 
-**wayland-cursor-smoother** aims to let the pointer glide smoothly across discontinuities at display corners, similar to Windows 11’s “Ease cursor movement between displays” option. Ideally this should be a baseline capability of Wayland itself; I hope this program becomes unnecessary sooner rather than later.
+## Is this your problem?
 
-## If you found `CornerBarrier` and thought that was the fix
+Run the pointer slowly along the edge shared with the next monitor, pushing
+outward at each height:
 
-It is not. This trips up nearly everyone who searches for this problem,
-including me, and it is convincing enough that people announce it as the
-solution before testing it properly.
+- **It crosses once you push firmly** → that is KWin's edge barrier, not this.
+  Set `EdgeBarrier=0` and `CornerBarrier=false` under `[EdgeBarrier]` in
+  `~/.config/kwinrc` and you are done. You do not need this project.
+- **There is a stretch where it never crosses, however hard or slowly you
+  push** → that is geometry. Your monitors do not overlap at those heights, so
+  there is no destination. No KWin setting can help, because nothing is in the
+  way. That is what this fixes.
 
-### Why it looks like the answer
+The red bands in the screenshot are the second kind.
 
-Search for a stuck cursor between KDE monitors and you will find this:
+### If you found `CornerBarrier` and thought that was the fix
+
+It is not, and this trips up nearly everyone who searches for this problem.
+Search for a stuck cursor between KDE monitors and you will find:
 
 ```ini
 # ~/.config/kwinrc
@@ -38,165 +55,242 @@ CornerBarrier=false
 EdgeBarrier=0
 ```
 
-The names match the symptom. Plasma 6.1 did introduce these. They genuinely do
-govern pointer movement between screens. And when you apply them, **the
-behaviour visibly changes** — which is exactly what makes the trap work.
+The names match the symptom, Plasma 6.1 did introduce them, they genuinely do
+govern pointer movement between screens, and applying them **visibly changes
+the behaviour** — which is exactly what makes the trap work.
 
-### What they actually do
-
-Both add resistance *on purpose*:
-
-- `EdgeBarrier` (default 100) — the pointer must be pushed this far past a
-  screen edge before it crosses to the adjacent screen. Intended to stop you
-  overshooting onto the next monitor by accident.
-- `CornerBarrier` (default on) — within 15px (Manhattan) of an output corner
-  the resistance becomes 2000px, effectively impassable. Intended to make
-  hot-corner and screen-edge actions reliably hittable, instead of sliding onto
-  the neighbouring screen before you can trigger them.
+Both settings add resistance *on purpose*. `EdgeBarrier` (default 100) is how
+far you must push past a screen edge before crossing, so you do not overshoot
+onto the next monitor by accident. `CornerBarrier` raises that to 2000px
+within 15px of an output corner, so hot corners stay reliably hittable.
 
 Turning them off removes resistance **where the pointer already had somewhere
 to go**. That is a real improvement, and it is why people believe they have
 solved it. Then they hit the dead band again.
 
-These settings cannot create screen area that does not exist.
+**These settings cannot create screen area that does not exist.** Removing
+resistance is not the same as adding redirection, and only the second one
+solves this.
 
-### Telling the two problems apart
+---
 
-Run the pointer slowly along the edge shared with the next monitor and push
-outward at each height:
+## Requirements
 
-- **It crosses once you push firmly** → that is the barrier. The settings above
-  will fix it, and you are done.
-- **There is a stretch of that edge where it never crosses, no matter how hard
-  or how slowly you push** → that is geometry. Your monitors do not overlap at
-  those heights, so there is no destination to move to. No KWin setting will
-  help, because nothing is in the way — there is simply nothing on the other
-  side.
+| | |
+|---|---|
+| Desktop | KDE Plasma on Wayland. There is no GNOME equivalent of the mechanism this uses |
+| Python | 3.8 or newer, standard library only for the core |
+| Packages | `python3-dbus` and `python3-gi` for the daemon. `kscreen-doctor` and `qdbus`/`gdbus` are almost certainly already installed with Plasma |
+| Kernel | `/dev/uinput` writable by you (often already `0666`; otherwise the `input` group or a udev rule) |
+| Access | read access to your pointing device's `/dev/input/event*` node — see [Device access](#device-access) |
 
-The red bands in the screenshot above are the second kind. They mark the
-stretches of the centre display's edges that the neighbouring displays do not
-span.
-
-### What would actually solve it
-
-Windows' *Ease cursor movement between displays* does not remove resistance —
-it **redirects**. On reaching a stretch of edge with no neighbour, it slides the
-pointer along that edge and into the nearest valid point of the adjacent
-display.
-
-Removing resistance is not the same as adding redirection. Nothing in KWin
-currently does the latter. That is what this project is for.
-
-## The approach being tried
-
-A virtual **absolute** pointer on `/dev/uinput`, driven from outside the
-compositor.
-
-Absolute pointer motion is the part that makes this possible. KWin scales an
-absolute pointer event against the geometry of the *whole* layout, so a single
-event can place the pointer anywhere on the desktop; it skips the edge barrier
-outright ("edge barriers are counter-productive for absolute motion"); and it
-is validated by its destination rather than by the path taken to get there.
-Unlike XTest, a uinput device is an ordinary evdev device as far as libinput
-and KWin are concerned, so nothing treats its events as untrusted. No portal
-is involved, so there is no permission dialog, no notification and no hidden
-cursor.
-
-The whole approach rests on one thing: **libinput has to classify the virtual
-device as a pointer.** Absolute axes alone are not enough — a device that also
-looks like a tablet or a touchscreen gets bound to a single display instead,
-and then it can never reach the display the pointer is supposed to move to.
-Declaring `ABS_X`/`ABS_Y` and a mouse button, and nothing else, is what puts
-it on the pointer path. This is the same shape as the absolute USB pointers
-that VMware and QEMU present to their guests.
-
-Note that this only concerns a *virtual* device. An ordinary graphics tablet
-is confined to one display because it is a tablet, not because Wayland's
-coordinates are per-display — a distinction that is easy to get backwards, and
-discouraging in the wrong direction if you do.
-
-### Checking your own layout
-
-This needs no special permissions, creates no device and moves nothing:
+On Debian or Ubuntu the two Python bindings are:
 
 ```console
-$ python3 tools/probe_uinput.py --layout-only
+$ sudo apt install python3-dbus python3-gi
 ```
 
-It reads your layout with `kscreen-doctor` and lists every stretch of every
-display edge that has no display behind it, along with where the pointer
-*would* be sent. If that list does not match the places your pointer actually
-gets stuck, the problem is not the one described above.
+If `./bin/wcsd --check` reports that `kscreen-doctor` is missing, install
+whichever package your distribution ships KScreen's command line tool in.
 
-### Checking whether the approach can work at all
+---
+
+## Setup
+
+### 1. Check what it would do
+
+This changes nothing, creates no device and needs no permissions:
 
 ```console
-$ python3 tools/probe_uinput.py
+$ ./bin/wcsd --check
 ```
 
-This additionally creates the virtual pointer, reports how udev and libinput
-classified it, and — if it passed — demonstrates the intended behaviour.
+It prints your layout, every stretch of edge with nothing behind it, where the
+pointer would be sent from each, and which pointing devices it can read. If
+the list of dead bands does not match the places your pointer actually gets
+stuck, stop here — your problem is a different one.
 
-The demonstration is animated and stepped, which matters more than it sounds
-like it should. It runs the pointer up to a dead edge so you can watch it stop
-there, waits, and then draws the redirect: a slide along the edge to the first
-point the neighbouring display reaches, followed by the crossing onto it. A
-warp is instantaneous, and on a large multi-display desk an instantaneous
-change of position cannot be checked by looking — the pointer is simply
-somewhere else. Watching it travel, you can tell at a glance whether the
-motion reads as a slide, and whether it lands anywhere near the middle of a
-display, which would be a failure rather than a partial success.
+### 2. Device access
 
-`--glide SECONDS` sets the pace, `--no-animate` warps instead, and `--no-step`
-runs it unattended.
+Detecting that you are *pushing* against an edge means reading your pointing
+device's own motion events, because a pinned pointer reports no movement at
+all. That needs read access to its `/dev/input/event*` node.
 
-Writing to `/dev/uinput` requires membership of the group that owns it, which
-is `input` on most distributions.
+The usual advice is to join the `input` group. **That grants read access to
+every input device, your keyboard included, to anything running as you.** It
+is worth avoiding.
 
-### Reading the pointer's device without reading the keyboard
-
-Detecting that the pointer is being pushed against an edge means reading that
-device's own motion events, which needs read access to its `/dev/input/event*`
-node.
-
-The usual advice is to join the `input` group. That grants read access to
-**every** input device, the keyboard included, to anything running as you, so
-it is worth avoiding if you can.
-
-A udev rule can be narrower, but the obvious narrow rule is the wrong one.
-Matching `ATTRS{idVendor}`/`ATTRS{idProduct}` looks precise and is not: those
+A udev rule can be narrower, but the obvious narrow rule is the wrong one:
+matching `ATTRS{idVendor}`/`ATTRS{idProduct}` looks precise and is not. Those
 attributes belong to the USB device, and a keyboard with an integrated
 TrackPoint or trackpad presents its keyboard and its pointer as two interfaces
-of one device sharing them. Such a rule hands over the keystrokes it was
-written to protect.
-
-Matching what udev has already classified the device as avoids that, and
-survives replacing the mouse:
-
-```
-ENV{ID_INPUT_KEYBOARD}=="1", GOTO="wcs_end"     # refuse first, always
-ENV{ID_INPUT_MOUSE}=="1",         TAG+="uaccess"
-ENV{ID_INPUT_POINTINGSTICK}=="1", TAG+="uaccess"
-ENV{ID_INPUT_TOUCHPAD}=="1",      TAG+="uaccess"
-```
-
-`TAG+="uaccess"` grants an ACL to whoever holds the active local session
-rather than to a group, so it does not reach remote or inactive users.
+of *one* device sharing them — so such a rule hands over the keystrokes it was
+written to protect. Matching what udev has already classified each node as
+avoids that, and survives replacing the mouse:
 
 ```console
-$ python3 tools/probe_evdev_access.py              # what is readable now
-$ python3 tools/probe_evdev_access.py --write-rule # the rule, and how to install it
-$ python3 tools/probe_evdev_access.py --watch 20   # which devices actually reach you
+$ ./tools/probe_evdev_access.py --write-rule
 ```
 
-The probe checks two things, and the second is the one that matters: some
-pointing device must be readable, and **no keyboard may be**. A rule that is
-too wide still makes the feature work, which is exactly why it needs checking
-separately.
+That prints the rule, writes it to a staging file and gives you the three
+commands to install it. The rule refuses anything tagged as a keyboard before
+it grants anything at all. Re-run the probe afterwards: it checks two things,
+and the second matters more than the first — some pointing device must be
+readable, and **no keyboard may be**.
 
-One case no rule can fix: if a pointing device shares a single event node with
-a keyboard, reading its motion means reading its keystrokes. The probe names
-such nodes instead of quietly skipping them.
+```console
+$ ./tools/probe_evdev_access.py --watch 20
+```
+
+Move every pointing device you own while that runs. Each should report a
+non-zero count; one that stays silent cannot drive a push.
+
+### 3. Run it
+
+```console
+$ ./bin/wcsd
+```
+
+Push into a dead edge and the pointer slides onto the neighbour. `--verbose`
+logs each arm and disarm as well, which is what you want while tuning.
+
+To start it with your session, as a systemd user unit — adjust the path:
+
+```ini
+# ~/.config/systemd/user/wayland-cursor-smoother.service
+[Unit]
+Description=wayland-cursor-smoother
+PartOf=graphical-session.target
+After=plasma-kwin_wayland.service
+
+[Service]
+ExecStart=%h/src/wayland-cursor-smoother/bin/wcsd
+Restart=on-failure
+
+[Install]
+WantedBy=graphical-session.target
+```
+
+```console
+$ systemctl --user enable --now wayland-cursor-smoother
+```
+
+---
+
+## Configuration
+
+Two things here are matters of taste and neither can be settled by argument,
+so both are settings: how hard you have to push, and whether the pointer
+jumps or travels.
+
+```console
+$ ./bin/wcsd --write-config ~/.config/wayland-cursor-smoother.conf
+```
+
+That writes a documented file holding exactly the built-in defaults, so a
+fresh copy changes nothing. Every value can also be given on the command line,
+which is much faster while you are finding what you like:
+
+```console
+$ ./bin/wcsd --verbose --threshold 50        # fire on a lighter push
+$ ./bin/wcsd --verbose --style warp          # jump instantly, as Windows does
+$ ./bin/wcsd --verbose --duration 0.15       # a slower glide
+```
+
+| Setting | Default | What it changes |
+|---|---|---|
+| `threshold` | 100 | Outward travel that counts as a push, in **device counts, not pixels** — pointer acceleration sits between the two, so what this measures is how far your hand moved. Lower it if the feature feels unresponsive; raise it if the pointer leaves a display when you only meant to reach its edge |
+| `window` | 0.3 | Seconds before a part-finished push is forgotten. Raise it to push in separate shoves |
+| `cooldown` | 0.5 | Seconds after a redirect before another can fire |
+| `style` | `glide` | `glide` travels; `warp` arrives instantly. A warp is what Windows does and costs nothing, but a few hundred pixels is far enough that the eye loses the pointer |
+| `duration` | 0.08 | Seconds a glide takes |
+| `rate` | 120 | Positions emitted per second while gliding |
+| `inset` | 2 | Pixels inside the destination display to land. A safety margin, not a preference |
+| `max_slide` | none | Refuse to redirect when the pointer would have to slide further than this along an edge |
+
+A mistyped key is an error rather than something silently ignored, so a
+setting that does nothing will tell you why.
+
+Changing the config needs a restart. `SIGHUP` re-reads the display layout
+only — send it after rearranging your monitors.
+
+---
+
+## How it works
+
+```
+KWin JS script          reads the global pointer position, which no Wayland
+   (loaded on demand)   client can see, and reports only while the pointer is
+        |               on one of the edge strips the daemon computed for it
+        |  D-Bus
+        v
+wcsd                    watches your pointing device for outward push while
+   (outside KWin)       that lasts, and writes the redirect to /dev/uinput
+```
+
+Three things make it possible.
+
+**A KWin script can read the pointer's layout-global position.** A Wayland
+client only ever receives surface-local coordinates, by design. Code inside
+the compositor does not have that limit.
+
+**A KWin script cannot move the pointer**, so something outside has to. A
+virtual **absolute** pointer on `/dev/uinput` can: KWin scales an absolute
+pointer event against the geometry of the *whole* layout, so one event places
+the pointer anywhere on the desktop, and absolute motion skips the edge
+barrier rather than fighting it. Unlike XTest, a uinput device is an ordinary
+evdev device as far as libinput and KWin are concerned, so nothing treats its
+events as untrusted. No portal is involved — no permission dialog, no
+notification, no hidden cursor.
+
+That rests on one requirement: **libinput has to classify the virtual device
+as a pointer.** Absolute axes alone are not enough; a device that also looks
+like a tablet or a touchscreen is bound to a single display and can never
+reach the one the pointer is meant to move to. Declaring `ABS_X`/`ABS_Y` and a
+mouse button and nothing else is what puts it on the pointer path — the same
+shape as the absolute USB pointers VMware and QEMU present to guests.
+
+*(This is only about a virtual device. An ordinary graphics tablet is confined
+to one display because it is a tablet, not because Wayland's coordinates are
+per-display. That distinction is easy to get backwards and discouraging in the
+wrong direction if you do.)*
+
+**Reaching the edge is not the same as pushing against it.** A pinned pointer
+stops moving, so the compositor has nothing left to report; redirecting on
+contact alone would fling the pointer to another screen every time you reached
+for something at the left of your centre display. The push is therefore read
+from the device itself, which also means a device that moves the cursor in
+discrete steps — including ones people use for accessibility — drives it just
+as well as a mouse does.
+
+The dead-band geometry lives in one place, in Python. The script is handed
+plain rectangles to test a point against, so the rule that decides where the
+pointer lands cannot drift between two languages.
+
+---
+
+## Troubleshooting
+
+Every layer has a probe that answers one question and stops guessing at the
+next.
+
+```console
+$ ./bin/wcsd --check                    # layout, dead bands, readable devices
+$ ./bin/wcsd --diagnose                 # walk the chain, say which link is broken
+$ ./tools/probe_uinput.py               # can a virtual pointer reach every display?
+$ ./tools/probe_evdev_access.py         # what can be read, and what must not be
+$ ./tools/probe_kwin_feed.py            # can a KWin script read the pointer?
+$ ./tools/probe_dbus_link.py            # can that script call the daemon?
+```
+
+`--diagnose` is the one to reach for when the daemon starts cleanly and does
+nothing. It loads the feed with tracing on, so the script reports the position
+it read and the band it computed, and it reads the compositor's journal back
+to you. A silence is not a diagnosis; that turns it into one.
+
+`tools/probe_uinput.py` is also the best way to see the intended behaviour
+without running the daemon at all: it animates each redirect, stepping so you
+can watch the pointer stop at a dead edge and then slide onto the neighbour.
 
 ### Tests
 
@@ -204,49 +298,58 @@ such nodes instead of quietly skipping them.
 $ python3 -m unittest discover -s tests
 ```
 
-Standard library only. These cover the layout maths and the landing
-semantics — the parts that can be decided without a display attached.
+Standard library only, no display needed. They cover the layout maths, the
+landing semantics, the push detector, the settings, the generated feed script
+and the raw evdev event stream.
+
+---
 
 ## Approaches investigated and rejected
 
-### The InputCapture portal — rejected
+**The InputCapture portal.** It can place the pointer at an arbitrary position
+and its pointer barriers even trigger on exactly the right condition. But
+xdg-desktop-portal-kde raises a high-urgency *"Input Capture Started — <app>
+has taken over the pointer and keyboard"* notification on **every** activation,
+and KWin hides the cursor for the duration. Here "activation" means "the user
+bumped a corner", so normal desktop use would produce a popup and a cursor
+blink every few seconds — far worse than the problem.
 
-`org.freedesktop.portal.InputCapture` can place the pointer at an arbitrary
-position: `Release()` accepts a `cursor_position` option, which
-xdg-desktop-portal-kde forwards to KWin, which warps the pointer. Its pointer
-barriers even trigger on exactly the right condition — the pointer pinned
-against an edge while the user keeps pushing.
+**The RemoteDesktop portal.** It can position the pointer absolutely, but only
+alongside a ScreenCast stream, which raises the screen-sharing indicator for
+as long as the session lives. A permanent "your screen is being shared" state
+is not a reasonable trade. (That indicator belongs to ScreenCast/RemoteDesktop,
+not to InputCapture — the two are rejected for different reasons.)
 
-It is unusable here anyway, because xdg-desktop-portal-kde raises a
-notification on *every* activation:
+**XTest / `xdotool`.** KWin treats XTest-injected input as untrusted and does
+not feed it into the real Wayland input pipeline.
 
-```ini
-[Event/inputcapturestarted]
-Comment=Input is now being managed by an application
-Action=Popup
-Urgency=High
-```
+**The Wayland pointer-warp protocol.** KWin restricts warping to surfaces of
+the window that currently holds pointer focus, so it cannot cross screens.
 
-> **Input Capture Started** — *&lt;app&gt; has taken over the pointer and keyboard.
-> Press Meta+Shift+Esc to stop this.*
+**An out-of-tree KWin plugin.** Technically the cleanest option — it could call
+`warp()` directly, with no IPC at all. Rejected because it would run inside the
+compositor on every pointer motion event, and a crash there takes down the
+session. Keeping that risk out of the compositor is why the design looks the
+way it does.
 
-KWin additionally hides the cursor for the duration of each capture. Here
-"activation" means "the user bumped a corner", so normal desktop use would
-produce a high-urgency popup and a cursor blink every few seconds. That is a
-far worse experience than the problem it sets out to fix.
+---
 
-### The RemoteDesktop portal — rejected
+## Scope and limitations
 
-`org.freedesktop.portal.RemoteDesktop` can position the pointer absolutely, but
-doing so requires an associated ScreenCast stream, which raises the
-screen-sharing indicator for as long as the session lives. Running a permanent
-"your screen is being shared" state in exchange for smoother pointer movement
-is not a reasonable trade.
+- **KDE Plasma on Wayland only.** The pointer-position half has no equivalent
+  elsewhere that I know of.
+- **KWin's scripting API is not a stability promise.** A Plasma upgrade may
+  break the feed; the probes above will say so immediately.
+- **Mixed-DPI layouts are untested.** Every display on the development machine
+  reports `Scale: 1`, so logical and physical pixels coincide there. The code
+  works in KWin's logical coordinates throughout, which should be right, but
+  it has not been exercised against a scaled display.
+- **One machine, one configuration.** It is in daily use on exactly one desk.
 
-Note that the screen-sharing indicator belongs to ScreenCast/RemoteDesktop, not
-to InputCapture — the two portals are rejected for different reasons.
+Ideally none of this would be necessary and a compositor would simply do the
+right thing at a discontinuous layout. I would be glad to see this become
+redundant.
 
-## Scope
+## Licence
 
-KDE Plasma on Wayland only. To the best of my knowledge there is no comparable
-way to do this on GNOME.
+See [LICENSE](LICENSE).
