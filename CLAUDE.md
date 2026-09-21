@@ -19,9 +19,15 @@ Guidance for Claude Code (and humans) working in this repository.
 
 ## Project status
 
-**It works, and it is in use.** `bin/wcsd` runs as a daemon and redirects the
-pointer out of the dead bands in the author's layout. Built and confirmed on
-hardware on 2026-09-21: Plasma 6.3.6 / KWin 6.3.6, Debian 13, kernel 6.12.
+**It works, it is in use, and development is closed for now.** `bin/wcsd`
+runs as a systemd user service and redirects the pointer out of the dead bands
+in the author's layout. Built and confirmed on hardware on 2026-09-21: Plasma
+6.3.6 / KWin 6.3.6, Debian 13, kernel 6.12.
+
+The author's own summary: *not entirely ideal, but quite practical for
+something one person built.* See "Closed, 2026-09-21", at the end of this
+file, for what was confirmed on hardware last and what was deliberately left
+alone.
 
 > [!IMPORTANT]
 > **This file is a record of how that happened, not a description of what
@@ -48,24 +54,22 @@ one of the explanations this file first offered for it was itself wrong.
 |---|---|
 | What exists and how to run it | `README.md` |
 | Why each approach was rejected | "Verified platform constraints", below |
-| What the author decided, and why | "Settled decisions" parts 1 and 2, and decision 8 |
+| What the author decided, and why | "Settled decisions" parts 1 and 2, and decisions 8 to 11 |
 | What was measured on hardware | the dated probe-result sections |
 | Claims that turned out wrong | every section headed **Correction** |
 
 ### What is still open
 
-- **Mixed-DPI is untested.** Every display on this desk reports `Scale: 1`, so
-  logical and physical pixels coincide here. The code works in KWin's logical
-  coordinates throughout, which should be correct, but "should" is not a test.
-- **The feel is not settled.** The author reports it differs from Windows in
-  some way not yet pinned down. `threshold`, `style` and `duration` are the
-  knobs; which one is responsible has not been established.
-- **The undo has never run on hardware.** `UndoLatch` is pinned by unit
-  tests, but no warp has been taken back on the author's desk. See "Settled
-  decision 10", below.
-- **The systemd user unit has never been installed.** `wcsd --write-service`
-  generates it, and its shape is pinned by tests, but no session has started
-  the daemon through systemd. See "Running it with the session", below.
+Very little, and nothing that blocks use. Everything that was once listed
+here as unverified has now run on the author's hardware — see "Closed,
+2026-09-21".
+
+- **The undo leaves a residual oddity.** It works and is practical, and the
+  author still notices something slightly off about it. What that something is
+  has not been pinned down; two candidates were named in advance and neither
+  has been ruled in. See "Closed, 2026-09-21".
+- **Mixed-DPI is out of scope, not open.** See settled decision 11 — do not
+  raise it as unfinished business.
 - **A stale `Cursor Feed 1.0` KWin script package** is installed on the
   author's machine from the original attempt. It is disabled and unrelated to
   anything here — the daemon loads its feed from a temp file and never
@@ -1476,6 +1480,11 @@ tempted by the same idea:
 
 ## Running it with the session, 2026-09-21: generated, and UNVERIFIED
 
+> [!NOTE]
+> **Superseded: it has since been installed and runs well.** The reasoning
+> below stands; only the "never been run" framing is stale. See "Closed,
+> 2026-09-21".
+
 `wcsd --write-service` renders a systemd user unit for the checkout it is run
 from. **Nothing below has been run through systemd**: this was written in a
 container with no systemd user manager, no session bus and no KWin. What the
@@ -1784,6 +1793,11 @@ layout gap-free rather than making a jump reversible.
 
 ## The undo, 2026-09-21: symmetry as the whole design
 
+> [!NOTE]
+> **Superseded in part: it has since run on hardware and is in use.** The
+> "what is not verified" section at the end is the stale part. See "Closed,
+> 2026-09-21".
+
 `UndoLatch` in `src/wcs/detect.py`, wired in `daemon.py`, off in glide.
 
 **The same `threshold` buys the redirect and buys it back.** No second number:
@@ -1829,4 +1843,76 @@ been taken back on hardware.** Two things to watch for on the first run:
 - a held TrackPoint pushed back and forth could ping-pong between a redirect
   and its undo. The cooldown guards one direction and `undo_window` the
   other, but the pairing has never been exercised.
+
+## Settled decision 11 — mixed-DPI is out of scope (2026-09-21)
+
+The author's ruling: **not needed, outside my interest.**
+
+This file listed "mixed-DPI is untested" as open from the first session
+onward, and it was never a defect — only an untested assumption. Every display
+on this desk reports `Scale: 1`, the code works in KWin's logical coordinates
+throughout, and the author has no scaled display and no plan to add one.
+
+So it is closed rather than pending. **Do not raise it as unfinished
+business.** `README.md` still says mixed-DPI layouts are untested, which is
+true and is the right thing to tell a stranger; that is a statement of fact,
+not a task.
+
+## Closed, 2026-09-21: the last three unknowns, answered on hardware
+
+The author ran what was left and reported back. All three items that this file
+carried as unverified are now settled, and development is closed for now.
+
+| | Result |
+|---|---|
+| The systemd user unit | **Installed and running. Works well.** |
+| The undo (taking a warp back) | **Works. Slightly odd still, but practical.** |
+| Mixed-DPI | **Not investigated, and not going to be** — settled decision 11 |
+
+### The unit needed nothing
+
+It was written in a container with no systemd, no session bus and no KWin, and
+it started and ran on the first attempt on real hardware. Both guesses it was
+built on held: the ordering against KWin, and the `ExecStartPre` that waits
+for the scripting interface rather than trusting `After=` alone. Whether the
+gate was ever load-bearing is unknown and now unanswerable — nothing failed,
+which is the outcome it was there to produce.
+
+### The undo works, and something about it is still not right
+
+The author's report: it works and is practical, **and a slight oddity
+remains** — not enough to want it changed, not nothing either. What the
+oddity is has not been pinned down.
+
+Two candidates were named before the first run, and **neither has been ruled
+in or out**:
+
+- the reverse push moves the pointer before the undo fires, because this
+  project cannot consume input, so the pointer visibly travels one way and
+  then snaps back. Whether that reads as a correction or as a second surprise
+  was always a question for the eye;
+- the same-`threshold` symmetry may simply be more motion than a correction
+  wants. Asymmetry — a lighter push to undo than to fire — is the obvious
+  thing to try, and was deliberately not built, because "an equal push the
+  other way" is what settled decision 10 asked for.
+
+If this is ever picked up again, that is the place to start, and the honest
+first step is to find out which of the two it is rather than changing both.
+
+### Where "the feel is not settled" went
+
+That item sat in the open list from the first working build, saying only that
+the author found it different from Windows in some way not yet pinned down.
+**It is not dropped, it is answered**, and the answer took most of a session:
+the difference was never the animation or the threshold. It was that a warp
+goes one way and the hand cannot take it back — settled decision 10, and the
+undo built from it. What is left of it is the residual oddity above, which is
+a much smaller and much better specified thing than the item it replaces.
+
+### What this file is now for
+
+Everything it records has either shipped, been ruled out, or been recorded as
+a correction. It has done its job, and the author intends to delete it before
+any public release — the note at the top still applies. `README.md` stands on
+its own and does not reference this file, so deleting it breaks nothing.
 
