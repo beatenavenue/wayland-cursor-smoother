@@ -373,9 +373,10 @@ way it does.
 - **KWin's scripting API is not a stability promise.** A Plasma upgrade may
   break the feed; the probes above will say so immediately.
 - **Mixed-DPI layouts are untested.** The code works in KWin's logical
-  coordinates throughout, and every display here reports `Scale: 1`, so
-  logical and physical pixels coincide. If a scaled display behaves oddly,
-  that is a bug worth reporting.
+  coordinates throughout, which should be all a scaled display needs, but
+  there was none to try it on: every display on the development machine
+  reports `Scale: 1`. If a scaled display behaves oddly, that is a bug worth
+  reporting.
 
 Ideally none of this would be necessary and a compositor would simply do the
 right thing at a discontinuous layout. I would be glad to see this become
