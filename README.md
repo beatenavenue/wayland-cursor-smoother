@@ -382,57 +382,37 @@ Ideally none of this would be necessary and a compositor would simply do the
 right thing at a discontinuous layout. I would be glad to see this become
 redundant.
 
-## Prior art
+## Alternatives
 
-**[MouseUnSnag](https://github.com/MouseUnSnag/MouseUnSnag)** solves the same
-problem on Windows 10, and is worth reading before changing anything here.
+If you are here because your pointer gets stuck, one of these may suit you
+better than this project does.
 
-It hooks `WH_MOUSE_LL`, which hands it the position the mouse *asked* for
-before Windows clamps it. Comparing that against the actual cursor position
-tells it "the cursor did not go where the mouse pointed" from a single event,
-with no threshold, no accumulator and no timing window. It then calls
-`SetCursorPos` and returns `1` from the hook, which **swallows** the motion
-that caused the jump.
+**[MouseUnSnag](https://github.com/MouseUnSnag/MouseUnSnag)** does the same job
+on Windows 10: it moves the pointer across when a misaligned layout has left it
+nowhere to go.
 
-Neither of those is available here. A Wayland client cannot see the unclamped
-position, and a virtual input device can only add events, never remove the
-user's. Most of what this project does differently follows from those two
-facts.
+**[Little Big Mouse](https://github.com/mgth/LittleBigMouse)** is for a
+different problem, worth knowing about if your displays differ in pixel
+density: where the pointer lands *physically* when it crosses between them,
+rather than at the matching pixel row. It runs on Windows, and its newer Linux
+backend is developed on KDE Plasma 6 Wayland.
 
-The two problems MouseUnSnag names, with the pictures that explain them better
-than prose can:
-
-- [How to disable sticky corners in Windows 10](https://superuser.com/questions/947817/how-to-disable-sticky-corners-in-windows-10):
-  deliberate resistance at a corner. **Not this project's problem**; the KWin
-  equivalent is `CornerBarrier`, and removing resistance is not the same as
-  adding redirection.
-- [How to make the mouse wrap from corners when moving between monitors?](https://superuser.com/questions/865469/how-to-make-the-mouse-wrap-from-corners-when-moving-between-monitors):
-  a stretch of edge with nothing behind it, because one display is taller
-  than its neighbour. **That one is this project's problem**, and the picture
-  there is the same shape as `img/motivation.png`.
-
-**[Little Big Mouse](https://github.com/mgth/LittleBigMouse)** is a separate
-tool for a separate problem, worth knowing about if your displays differ in
-pixel density: it is about where the pointer lands *physically* when it
-crosses between displays, rather than at the matching pixel row. It runs on
-Windows, and its newer Linux backend is developed on KDE Plasma 6 Wayland.
-
-### What Windows 11 itself does
-
-Microsoft calls it *Ease cursor movement between displays*, under Settings →
-System → Display → Multiple displays, since build 22557, stored as
-`CursorDeadzoneJumpingSetting` under `HKCU\Control Panel\Cursors`
+**Windows 11 has this built in**, as *Ease cursor movement between displays*
+under Settings → System → Display → Multiple displays, since build 22557
 ([elevenforum](https://www.elevenforum.com/t/turn-on-or-off-ease-cursor-movement-between-displays-in-windows-11.4873/)).
-The internal name is the honest description of the mechanism: deadzone
-jumping.
-
-It is one checkbox with nothing to tune, and it draws the complaint you would
-expect of a jump with no push threshold in front of it: people whose monitors
-do not line up report the pointer teleporting to the corner of the display
-above when they merely touch the top edge, and go looking for the switch
+It is one checkbox with nothing to tune, and it is not a settled answer either:
+people whose monitors do not line up report the pointer teleporting to the
+corner of the display above when they merely touch the top edge
 ([Microsoft Community
 Hub](https://techcommunity.microsoft.com/discussions/windowsinsiderprogram/windows-11-multi-monitor-issue---cursor-jumps-to-closest-corner-of-above-monitor/3699709)).
-Worth knowing before treating it as the reference behaviour to copy.
+
+Two problems that look alike get discussed together, and these threads have the
+pictures that tell them apart:
+
+- [How to disable sticky corners in Windows 10](https://superuser.com/questions/947817/how-to-disable-sticky-corners-in-windows-10):
+  deliberate resistance at a corner. **Not this project's problem.**
+- [How to make the mouse wrap from corners when moving between monitors?](https://superuser.com/questions/865469/how-to-make-the-mouse-wrap-from-corners-when-moving-between-monitors):
+  a stretch of edge with nothing behind it. **That one is.**
 
 ## Licence
 

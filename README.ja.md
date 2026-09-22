@@ -457,54 +457,37 @@ InputCapture のものではありません。2つは別々の理由で見送ら
 理想を言えばこんなものは必要なく、不連続な配置に対してコンポジタが素直に正しく
 振る舞ってくれればよいのです。これが不要になる日が来るなら、喜ばしいことです。
 
-## 先行事例
+## ほかの選択肢
 
-**[MouseUnSnag](https://github.com/MouseUnSnag/MouseUnSnag)** は同じ問題を
-Windows 10 上で解いており、ここに手を入れる前に読む価値があります。
+ポインタが引っかかるという理由でここに辿り着いたのなら、次のいずれかのほうが
+本プロジェクトより合うかもしれません。
 
-`WH_MOUSE_LL` をフックし、Windows がクランプする前の、マウスが*要求した*位置を
-受け取ります。それを実際のカーソル位置と比べれば、「カーソルはマウスが指した場所へ
-行かなかった」ということが1つのイベントから分かります。しきい値も、累積器も、
-タイミングウィンドウも要りません。そして `SetCursorPos` を呼び、フックから `1` を
-返すことで、ジャンプの原因になった移動そのものを**飲み込み**ます。
+**[MouseUnSnag](https://github.com/MouseUnSnag/MouseUnSnag)** は Windows 10 上で
+同じ仕事をします。揃っていない配置のせいでポインタの行き先がなくなったときに、
+向こう側へ動かしてくれます。
 
-そのどちらもここでは使えません。Wayland クライアントはクランプ前の位置を見られず、
-仮想入力デバイスはイベントを足すことしかできず、利用者のイベントを取り除くことは
-できません。本プロジェクトのやり方が違っている部分の多くは、この2つの事実から
-来ています。
-
-MouseUnSnag が名指ししている2つの問題です。文章よりも、そこにある図のほうが
-うまく説明してくれます。
-
-- [How to disable sticky corners in Windows 10](https://superuser.com/questions/947817/how-to-disable-sticky-corners-in-windows-10):
-  角における意図的な抵抗。**本プロジェクトの問題ではありません。** KWin での
-  相当物は `CornerBarrier` で、抵抗を取り除くことはリダイレクトを加えることと
-  同じではありません。
-- [How to make the mouse wrap from corners when moving between monitors?](https://superuser.com/questions/865469/how-to-make-the-mouse-wrap-from-corners-when-moving-between-monitors):
-  一方のディスプレイが隣より背が高いために、その先に何もない縁の区間ができている
-  もの。**こちらが本プロジェクトの問題です。** そこにある図は
-  `img/motivation.png` と同じ形をしています。
-
-**[Little Big Mouse](https://github.com/mgth/LittleBigMouse)** は、別の問題のための
-別のツールですが、ディスプレイごとに画素密度が違うなら知っておく価値があります。
+**[Little Big Mouse](https://github.com/mgth/LittleBigMouse)** は別の問題のための
+ものですが、ディスプレイごとに画素密度が違うなら知っておく価値があります。
 ディスプレイ間を越えるときに、対応するピクセル行ではなく*物理的に*どこへ着地するか、
 を扱うものです。Windows で動き、新しい Linux バックエンドは KDE Plasma 6 Wayland
 上で開発されています。
 
-### Windows 11 自身が行っていること
-
-Microsoft はこれを *Ease cursor movement between displays* と呼んでいます。
-設定 → システム → ディスプレイ → 複数のディスプレイ にあり、ビルド 22557 以降、
-`HKCU\Control Panel\Cursors` の `CursorDeadzoneJumpingSetting` として保存されます
+**Windows 11 にはこれが組み込まれています。** *Ease cursor movement between
+displays* という名前で、設定 → システム → ディスプレイ → 複数のディスプレイ にあり、
+ビルド 22557 以降で使えます
 ([elevenforum](https://www.elevenforum.com/t/turn-on-or-off-ease-cursor-movement-between-displays-in-windows-11.4873/))。
-機構の正直な説明になっているのは内部名のほうです。デッドゾーン・ジャンプ、です。
-
-調整するもののないチェックボックスが1つあるだけで、押し込みのしきい値を持たない
-ジャンプから予想される通りの苦情を集めています。モニタが揃っていない人が、上の縁に
-触れただけでポインタが上のディスプレイの角へテレポートすると報告し、スイッチを
-探しに来るのです
+調整するもののないチェックボックスが1つあるだけで、こちらも決着した答えでは
+ありません。モニタが揃っていない人が、上の縁に触れただけでポインタが上の
+ディスプレイの角へテレポートすると報告しています
 ([Microsoft Community Hub](https://techcommunity.microsoft.com/discussions/windowsinsiderprogram/windows-11-multi-monitor-issue---cursor-jumps-to-closest-corner-of-above-monitor/3699709))。
-真似るべき参照挙動として扱う前に、知っておく価値があります。
+
+よく似た2つの問題が一緒に語られがちです。次のスレッドにある図が、その違いを
+うまく見せてくれます。
+
+- [How to disable sticky corners in Windows 10](https://superuser.com/questions/947817/how-to-disable-sticky-corners-in-windows-10):
+  角における意図的な抵抗。**本プロジェクトの問題ではありません。**
+- [How to make the mouse wrap from corners when moving between monitors?](https://superuser.com/questions/865469/how-to-make-the-mouse-wrap-from-corners-when-moving-between-monitors):
+  その先に何もない縁の区間。**こちらが本プロジェクトの問題です。**
 
 ## ライセンス
 
