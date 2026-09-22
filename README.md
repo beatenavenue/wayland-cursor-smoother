@@ -372,11 +372,10 @@ way it does.
   elsewhere that I know of.
 - **KWin's scripting API is not a stability promise.** A Plasma upgrade may
   break the feed; the probes above will say so immediately.
-- **Mixed-DPI layouts are untested.** Every display on the development machine
-  reports `Scale: 1`, so logical and physical pixels coincide there. The code
-  works in KWin's logical coordinates throughout, which should be right, but
-  it has not been exercised against a scaled display.
-- **One machine, one configuration.** It is in daily use on exactly one desk.
+- **Mixed-DPI layouts are untested.** The code works in KWin's logical
+  coordinates throughout, and every display here reports `Scale: 1`, so
+  logical and physical pixels coincide. If a scaled display behaves oddly,
+  that is a bug worth reporting.
 
 Ideally none of this would be necessary and a compositor would simply do the
 right thing at a discontinuous layout. I would be glad to see this become
@@ -400,10 +399,9 @@ backend is developed on KDE Plasma 6 Wayland.
 **Windows 11 has this built in**, as *Ease cursor movement between displays*
 under Settings → System → Display → Multiple displays, since build 22557
 ([elevenforum](https://www.elevenforum.com/t/turn-on-or-off-ease-cursor-movement-between-displays-in-windows-11.4873/)).
-It is one checkbox with nothing to tune, and it is not a settled answer either:
-people whose monitors do not line up report the pointer teleporting to the
-corner of the display above when they merely touch the top edge
-([Microsoft Community
+It is the behaviour this project set out to reproduce. It is a single on/off
+setting with nothing to tune, and on some layouts it crosses on contact rather
+than on a push ([Microsoft Community
 Hub](https://techcommunity.microsoft.com/discussions/windowsinsiderprogram/windows-11-multi-monitor-issue---cursor-jumps-to-closest-corner-of-above-monitor/3699709)).
 
 Two problems that look alike get discussed together, and these threads have the
