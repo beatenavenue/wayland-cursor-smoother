@@ -474,7 +474,7 @@ InputCapture のものではありません。2つは別々の理由で見送ら
 
 **Windows 11 にはこれが組み込まれています。** 「ディスプレイ間でカーソルを簡単に
 移動させる」（英語版では *Ease cursor movement between displays*）という名前で、
-設定 → システム → ディスプレイ → 複数のディスプレイ にあり、ビルド 22557 以降で
+設定 → システム → ディスプレイ → マルチ ディスプレイ にあり、ビルド 22557 以降で
 使えます
 ([elevenforum](https://www.elevenforum.com/t/turn-on-or-off-ease-cursor-movement-between-displays-in-windows-11.4873/))。
 本プロジェクトが再現しようとしているのは、この挙動です。オン/オフの切り替えだけで
