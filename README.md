@@ -1,5 +1,7 @@
 # wayland-cursor-smoother
 
+[日本語](README.ja.md)
+
 Slide the pointer past the gaps in a non-rectangular multi-display layout, on
 KDE Plasma / Wayland.
 
@@ -82,7 +84,7 @@ solves this.
 | Python | 3.8 or newer, standard library only for the core |
 | Packages | `python3-dbus` and `python3-gi` for the daemon. `kscreen-doctor` and `qdbus`/`gdbus` are almost certainly already installed with Plasma |
 | Kernel | `/dev/uinput` writable by you (often already `0666`; otherwise the `input` group or a udev rule) |
-| Access | read access to your pointing device's `/dev/input/event*` node. See [Device access](#device-access) |
+| Access | read access to your pointing device's `/dev/input/event*` node. See [Device access](#2-device-access) |
 
 On Debian or Ubuntu the two Python bindings are:
 
