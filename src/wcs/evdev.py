@@ -11,10 +11,10 @@ the narrow alternative instead.
 
 **Matching by vendor and product is the obvious narrow rule and it is wrong
 here.**  `ATTRS{idVendor}` walks up to the USB device, and a keyboard with an
-integrated pointing device — a TrackPoint, a trackpad on a keyboard — presents
-its keyboard and its pointer as two interfaces of *one* USB device sharing
-those ids.  A rule matching them grants the keyboard node too, which is the
-exact thing the rule exists to avoid.
+integrated pointing device, such as a TrackPoint or a trackpad, presents its
+keyboard and its pointer as two interfaces of *one* USB device sharing those
+ids.  A rule matching them grants the keyboard node too, which is the exact
+thing the rule exists to avoid.
 
 Matching by capability does not have that problem, and is also stable when a
 mouse is replaced: grant to nodes udev tags as a pointer, never to a node it

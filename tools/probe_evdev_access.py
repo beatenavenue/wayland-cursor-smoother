@@ -12,15 +12,15 @@ checks the case that makes the obvious narrow rule wrong: **a keyboard with an
 integrated pointing device.**  A TrackPoint and its keyboard are two interfaces
 of one USB device and share a vendor and product id, so a rule matching those
 ids would grant the keyboard node too.  Matching what udev calls the device
-instead should avoid that — should, which is why this runs rather than
-asserts.
+instead should avoid that.  It is "should" rather than "does" that makes this
+a probe and not an assertion.
 
     python3 tools/probe_evdev_access.py              # what is readable today
     python3 tools/probe_evdev_access.py --write-rule # emit the rule + commands
     python3 tools/probe_evdev_access.py --watch 20   # which devices reach us
 
 Run the last one after installing the rule, and exercise every pointing device
-you own while it runs — mouse, TrackPoint, touchpad — then check each one is
+you own while it runs (mouse, TrackPoint, touchpad), then check each one is
 counted and that no keystroke ever is.
 """
 
