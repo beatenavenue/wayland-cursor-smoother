@@ -135,28 +135,36 @@ class PushDetector:
         return min(1.0, self._accumulated / self.threshold)
 
 
-#: Seconds a redirect stays undoable. Long enough to notice the pointer is
-#: somewhere unexpected and start pushing back, short enough that a push a
-#: minute later is a new intention rather than a correction.
+#: Seconds a redirect stays undoable, once undo is switched on. It is off by
+#: default; this is the value suggested for trying it. Long enough to notice
+#: the pointer is somewhere unexpected and start moving back, short enough that
+#: a movement a minute later is a new intention rather than a correction.
 DEFAULT_UNDO_WINDOW = 3.0
 
 
 @dataclass
 class UndoLatch:
-    """Take a redirect back when the user pushes the same amount the other way.
+    """Take a warp back when the user moves the same amount the other way.
 
-    A warp costs the user something a glide does not. What a person feels
-    continuously is how far their hand moved, not where the pointer is -- the
-    pointer is barely watched and often lost. So a warp that moves the pointer
-    somewhere unexpected leaves the hand holding a displacement it never made,
-    and the natural correction is to push back *the same amount*. Without this
-    the pointer does not come back: the way home is a detour around the edge
-    the redirect slid along.
+    **Off by default, and not needed to get back.** A redirect lands where the
+    two displays meet, so the way back is never walled: moving back crosses
+    over like any shared edge. What that does not do is return to the exact
+    point the warp left from. The pointer comes out at the end of the dead
+    band, one slide away. This latch closes that gap.
 
-    Symmetry is the whole design. The same ``threshold`` buys the redirect and
-    buys it back, so the gesture is its own inverse, and nothing new has to be
-    learnt. The latch is armed only after a warp, because a glide has already
-    shown the way back and costs the same motion to retrace.
+    It is off because it cannot see where the pointer is. The feed reports only
+    inside the watch strips, so once a warp has left the strip the daemon has
+    no position at all. Every event with a component the other way counts,
+    anywhere on the screen. And because the accumulator stops at zero rather
+    than going negative, what it measures is travel back *since the furthest
+    point reached*, not net travel since the warp. A small correction in the
+    middle of the other display is enough. In use, that felt like the pointer
+    being thrown somewhere nobody asked for.
+
+    The same ``threshold`` buys the redirect and buys it back. The latch is
+    armed only after a warp. A glide comes back the same way a warp does, but
+    it has drawn where the pointer went, so the gap is something the user has
+    seen rather than something done to them.
     """
 
     threshold: float = DEFAULT_THRESHOLD

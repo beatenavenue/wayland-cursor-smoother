@@ -51,9 +51,9 @@ class DetectConfig:
     threshold: float = 100.0
     window: float = 0.3
     cooldown: float = 0.5
-    #: Seconds a warp stays undoable; ``None`` switches undo off. Only warps
-    #: are undoable -- see `UndoLatch` for why a glide needs nothing.
-    undo_window: Optional[float] = 3.0
+    #: Seconds a warp stays undoable; ``None`` switches undo off, and is the
+    #: default. See `UndoLatch` for why it is off, and why only a warp has it.
+    undo_window: Optional[float] = None
 
 
 @dataclass(frozen=True)
@@ -246,16 +246,21 @@ window = {d.window:g}
 # Seconds after a redirect during which another cannot fire.
 cooldown = {d.cooldown:g}
 
-# Seconds during which a warp can be taken back by pushing `threshold` the
-# other way. What you feel while using a pointer is how far your hand moved,
-# not where the pointer is -- so when a warp puts it somewhere unexpected, the
-# correction you reach for is pushing back the same amount. Without this the
-# pointer does not come back: the way home is a detour around the edge the
-# redirect slid along.
+# Seconds after a warp during which moving `threshold` the other way puts the
+# pointer back exactly where it was.
 #
-# `off` (or 0) disables it. **It applies to style = warp only.** A glide has
-# already shown you the way back, and retracing it costs the same motion it
-# cost to arrive, so there is nothing to undo.
+# You do not need this to go back. A redirect lands where the two displays
+# meet, so there is no wall on the way back. Move the pointer back and it
+# crosses over. It comes out at the end of the dead stretch, though, not at the
+# exact point it left from. This setting closes that gap.
+#
+# It is off by default, because it does not check where the pointer is. Any
+# movement back counts, anywhere on the screen. So a small correction far from
+# the edge can send the pointer back across. If you want to try it, 3 is a
+# reasonable value. A button press cancels it, because clicking means you meant
+# to be there.
+#
+# `off` (or 0) disables it. **It applies to style = warp only.**
 undo_window = {"off" if d.undo_window is None else format(d.undo_window, "g")}
 
 [redirect]

@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 920 366" width="920" height="366" role="img" aria-labelledby="t d">
   <title id="t">glide and warp</title>
-  <desc id="d">The pointer is pushed against a stretch of display edge that the neighbouring display does not reach. With style = glide it travels: along the edge to the nearest point the neighbour reaches, then across. With style = warp it arrives there with no path, and an equal push the other way puts it back exactly where it was.</desc>
+  <desc id="d">The pointer is pushed against a stretch of display edge that the neighbouring display does not reach. With style = glide it travels: along the edge to the nearest point the neighbour reaches, then across. With style = warp it arrives at the same point with no path. In both, the way back has no wall. Moving back crosses over at that same corner, not at the point where the pointer started.</desc>
 
   <style>
     .ink   { fill: #1f2328 }
@@ -57,11 +57,17 @@
       <path class="go"   d="M166,90 L130,90" marker-end="url(#arrow)"/>
       <use href="#cur" x="166" y="182"/>
       <use href="#cur" x="120" y="86"/>
+
+      <!-- the way back: no wall, it crosses at the same corner -->
+      <path class="halo" d="M140,80 L188,80"/>
+      <path class="back" d="M140,80 L188,80" marker-end="url(#arrowback)"/>
+      <text class="tag" x="198" y="85" fill="#1a7f37">the way back</text>
+      <text class="tag" x="198" y="103" fill="#1a7f37">has no wall</text>
     </g>
 
     <text class="cap muted" x="0" y="272">The pointer <tspan class="ink" font-weight="600">travels</tspan>: along the edge to the nearest</text>
-    <text class="cap muted" x="0" y="294">point the neighbour reaches, then across. Going</text>
-    <text class="cap muted" x="0" y="316">back costs the motion it cost to arrive.</text>
+    <text class="cap muted" x="0" y="294">point the neighbour reaches, then across. On the way</text>
+    <text class="cap muted" x="0" y="316">back there is no wall. It crosses at the same corner.</text>
   </g>
 
   <!-- ================= warp ================= -->
@@ -78,15 +84,15 @@
       <g opacity="0.35"><use href="#cur" x="166" y="182"/></g>
       <use href="#cur" x="120" y="86"/>
 
-      <!-- an equal push the other way brings it back -->
-      <path class="halo" d="M128,100 L164,176"/>
-      <path class="back" d="M128,100 L164,176" marker-end="url(#arrowback)"/>
-      <text class="tag" x="20" y="146" fill="#1a7f37">an equal push</text>
-      <text class="tag" x="20" y="164" fill="#1a7f37">back returns it</text>
+      <!-- the way back: no wall, it crosses at the same corner -->
+      <path class="halo" d="M140,80 L188,80"/>
+      <path class="back" d="M140,80 L188,80" marker-end="url(#arrowback)"/>
+      <text class="tag" x="198" y="85" fill="#1a7f37">the way back</text>
+      <text class="tag" x="198" y="103" fill="#1a7f37">has no wall</text>
     </g>
 
-    <text class="cap muted" x="0" y="272">The pointer <tspan class="ink" font-weight="600">arrives</tspan>. There is no path to follow,</text>
-    <text class="cap muted" x="0" y="294">so an equal push the other way puts it back</text>
-    <text class="cap muted" x="0" y="316">exactly where it was.</text>
+    <text class="cap muted" x="0" y="272">The pointer <tspan class="ink" font-weight="600">arrives</tspan> at the same point, with no path</text>
+    <text class="cap muted" x="0" y="294">to follow. The way back is the same as with glide:</text>
+    <text class="cap muted" x="0" y="316">there is no wall, and it crosses at the same corner.</text>
   </g>
 </svg>
