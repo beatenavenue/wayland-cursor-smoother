@@ -54,7 +54,7 @@ one of the explanations this file first offered for it was itself wrong.
 |---|---|
 | What exists and how to run it | `README.md` |
 | Why each approach was rejected | "Verified platform constraints", below |
-| What the author decided, and why | "Settled decisions" parts 1 and 2, and decisions 8 to 11 |
+| What the author decided, and why | "Settled decisions" parts 1 and 2, and decisions 8 to 12 |
 | What was measured on hardware | the dated probe-result sections |
 | Claims that turned out wrong | every section headed **Correction** |
 
@@ -64,6 +64,8 @@ Very little, and nothing that blocks use. Everything that was once listed
 here as unverified has now run on the author's hardware — see "Closed,
 2026-09-21".
 
+- **Answered, 2026-09-23: the undo is now off by default.** The oddity below
+  was the undo firing anywhere on screen. See "Settled decision 12".
 - **The undo leaves a residual oddity.** It works and is practical, and the
   author still notices something slightly off about it. What that something is
   has not been pinned down; two candidates were named in advance and neither
@@ -1748,6 +1750,10 @@ Three consequences, as the author stated them:
 3. **Only warp needs a way back.** A glide has already returned by the same
    amount of motion it took to slide in.
 
+> [!NOTE]
+> **Consequences 2 and 3 were revised on 2026-09-23.** Neither style needs a
+> way back: the way back is never walled. See "Settled decision 12".
+
 ### Correction, 2026-09-21: the axis is reciprocity, not information
 
 Earlier this session I argued the glide/warp split this way:
@@ -1792,6 +1798,11 @@ Worth keeping because it is the right shape for a different goal: it makes the
 layout gap-free rather than making a jump reversible.
 
 ## The undo, 2026-09-21: symmetry as the whole design
+
+> [!CAUTION]
+> **Off by default since 2026-09-23, and built on a false premise.** It
+> assumed the way back was a detour. It is not; the way back is open. See
+> "Settled decision 12".
 
 > [!NOTE]
 > **Superseded in part: it has since run on hardware and is in use.** The
@@ -1916,3 +1927,87 @@ a correction. It has done its job, and the author intends to delete it before
 any public release — the note at the top still applies. `README.md` stands on
 its own and does not reference this file, so deleting it breaks nothing.
 
+## Settled decision 12: undo is off by default (2026-09-23)
+
+The author's report: after a warp, for a while, a slight movement back
+snapped the pointer to where the warp started, wherever the pointer was.
+Crossing the wall reads as "did I just brush a corner?", and is close to
+invisible. The undo fired with the pointer in the middle of the other display,
+and it was not "the same amount of motion back" either.
+
+### What the code did
+
+- `UndoLatch` takes no position, and could not use one. The feed reports only
+  inside the watch strips, so once a warp has left the strip the daemon has no
+  position at all.
+- The accumulator stops at zero. So it measures travel back **since the
+  furthest point reached**, not net travel since the warp. Run against the
+  class: 300 counts left then 100 right fires; downward motion drifting +1 x
+  per batch fires after 100 batches.
+- It shares the push's 100, but the push only accumulates while the pointer
+  is pinned at a dead edge. The undo accumulates anywhere. Same number, very
+  different condition.
+
+This is very probably the "residual oddity" left open on 2026-09-21. Of the
+two candidates named then, the first (the pointer moves before the undo
+fires) is part of what was seen. The second (the same threshold may be too
+much motion) was backwards: it fired on too little, and in the wrong place.
+
+### The alternative the author proposed, and why it fails as stated
+
+For a while after a warp, watch the exit of the way back, and re-cross when
+the user pushes there. **The exit is not a wall.** Computed for all four bands
+on this desk, 3px back from each landing point is on DP-4:
+
+```
+band 0  DP-4 left   -> DP-3 (1917,514)   3px back: DP-4 (1920,514)
+band 1  DP-4 left   -> DP-3 (1917,1589)  3px back: DP-4 (1920,1589)
+band 2  DP-4 right  -> DP-1 (5762,94)    3px back: DP-4 (5759,94)
+band 3  DP-4 right  -> DP-1 (5762,2009)  3px back: DP-4 (5759,2009)
+```
+
+This follows from the landing rule: the landing point is the nearest point
+the neighbour reaches, which is where the two displays meet. A push detector
+needs the pointer pinned. On a live edge KWin passes it straight through.
+This desk has `EdgeBarrier=0` (read from `kwinrc` on 2026-09-23), so the
+pointer crosses on the first event and a push there would never fire. With
+the default `EdgeBarrier=100` it would race KWin's own barrier.
+
+A reading that does work was offered and not taken: use the crossing itself
+as the trigger. The feed already sends `Edge(-1, x, y)` on leaving a strip, so
+a position past the edge right after an exit strip means the pointer came
+back.
+
+On whether strips can change at runtime: they need not. The exit is fixed per
+band (every point in a band lands on the same corner), so exit strips can be
+computed at layout time. The script can always report them and the daemon can
+decide whether they are open. The only direction proven on hardware is
+script to daemon.
+
+### The experiment, and the ruling
+
+With `--undo-window 0` the author found the return more natural: the way back
+has no catch at all, so the movement that matches the crossing push brings the
+pointer back. Ruling: **keep the feature, default it to off**, and correct the
+explanation everywhere it appears.
+
+### Correction, 2026-09-23: "the way home is a detour" was wrong
+
+Written on 2026-09-21 in `README.md`, `README.ja.md`, the `--write-config`
+comment and the `UndoLatch` docstring:
+
+> Without this the pointer does not come back: the way home is a detour around
+> the edge the redirect slid along.
+
+**False.** The way back is always open, for the reason above. What differs is
+where the pointer comes out: at the end of the dead band, one slide away from
+where it started (258px for band 0). That is true for `glide` as much as for
+`warp`. The claim was reasoned and never measured, and the whole undo was
+built on it. The diagram (`img/style.svg`) drew the same claim as a green
+arrow back to the start, and now draws the way back crossing at the corner.
+
+### On the author's machine
+
+A config file written by `--write-config` before this change says
+`undo_window = 3` in so many words, and the new default does nothing to it.
+That line has to be changed to `off` or removed.

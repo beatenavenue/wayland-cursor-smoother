@@ -80,9 +80,9 @@ def build_parser() -> argparse.ArgumentParser:
                         help="seconds after a redirect before another can fire")
     detect.add_argument("--undo-window", type=float, dest="undo_window",
                         metavar="SECONDS",
-                        help="seconds a warp can be taken back by pushing the "
-                             "same amount the other way; 0 switches it off "
-                             "(style=warp only)")
+                        help="seconds a warp can be taken back by moving the "
+                             "same amount the other way; off by default, and 0 "
+                             "switches it off (style=warp only)")
 
     redirect = parser.add_argument_group("redirect (overrides the config file)")
     redirect.add_argument("--style", choices=STYLES,

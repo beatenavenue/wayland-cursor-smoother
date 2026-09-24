@@ -214,27 +214,28 @@ which is much faster while you are finding what you like:
 | `rate` | 120 | Positions emitted per second while gliding |
 | `inset` | 2 | Pixels inside the destination display to land. A safety margin, not a preference |
 | `max_slide` | none | Refuse to redirect when the pointer would have to slide further than this along an edge |
-| `undo_window` | 3 | Seconds a **warp** can be taken back by pushing `threshold` the other way. `off` disables it; it does nothing under `style = glide` |
+| `undo_window` | off | Seconds after a **warp** during which moving `threshold` the other way puts the pointer back exactly where it was. Read the next section before you turn it on. It does nothing under `style = glide` |
 
-### Taking a warp back
+### Going back
 
-What you feel while using a pointer is how far your hand moved, not where the
-pointer is. The pointer is barely watched, and often lost. That is why a dead
-zone is worth fixing at all: your hand moves and the pointer is not where you
-expected it.
+A redirect starts at a stretch of edge with nothing behind it. But it lands
+where the two displays meet, so there is no wall on the way back. Move the
+pointer back and it crosses over, as it does at any edge the two displays
+share. You do not have to push.
 
-A warp has the same problem from the other side. When it puts the pointer
-somewhere you did not ask for, your hand is holding a displacement it never
-made, and pushing back does not undo it, because the way home is a detour
-around the edge the redirect slid along.
+It comes back at the end of the dead stretch, not at the exact point it left
+from. The distance between the two is how far the redirect slid along the
+edge. This is the same for `glide` and `warp`.
 
-So a warp stays undoable for `undo_window` seconds: **push `threshold` the
-other way and the pointer goes back exactly where it was.** The same amount of
-motion buys it and buys it back. A button press cancels the offer, because
-clicking means you meant to be there.
+For a warp, `undo_window` can close that gap. For that many seconds after a
+warp, moving `threshold` counts the other way puts the pointer back exactly
+where it was. A button press cancels it, because clicking means you meant to
+be there.
 
-A glide needs none of this and does not get it: it already travelled the way
-back in front of you, and retracing it costs the motion it cost to arrive.
+**It is off by default, because it does not check where the pointer is.** Any
+movement back counts, anywhere on the screen. So a small correction in the
+middle of the other display can send the pointer back across, when you only
+meant to work there.
 
 A mistyped key is an error rather than something silently ignored, so a
 setting that does nothing will tell you why. `--check` also prints whether the

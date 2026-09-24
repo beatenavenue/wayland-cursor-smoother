@@ -82,9 +82,8 @@ class Daemon:
             window=config.detect.window,
             cooldown=config.detect.cooldown,
         )
-        #: Armed after a warp only. A glide has already shown the way back
-        #: and costs the same motion to retrace; a warp leaves the hand
-        #: holding a displacement it never made. See UndoLatch.
+        #: Off by default, and armed after a warp only. See UndoLatch for why
+        #: on both counts.
         self._undo = (
             UndoLatch(threshold=config.detect.threshold,
                       window=config.detect.window,
