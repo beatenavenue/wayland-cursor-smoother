@@ -1,14 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 590 360" width="590" height="360">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 590 360" width="590" height="360" role="img" aria-labelledby="t d">
+  <title id="t">laptop and external monitor</title>
+  <desc id="d">A laptop next to a larger external monitor. The laptop screen is smaller and sits lower, so the two screens meet only along a short part of the edge between them. That part is marked in green.</desc>
+
   <style>
+    .bg     { fill: #ffffff; stroke: #d0d7de; stroke-width: 1; }
     .body   { fill: #ffffff; stroke: #333333; stroke-width: 4; stroke-linejoin: round; }
     .screen { fill: #e8eef5; }
     .facing { fill: rgba(29, 158, 117, 0.15); stroke: #1d9e75; stroke-width: 3; }
-    @media (prefers-color-scheme: dark) {
-      .body   { fill: #1e1e1e; stroke: #cccccc; }
-      .screen { fill: #2c3a48; }
-      .facing { fill: rgba(93, 202, 165, 0.2); stroke: #5dcaa5; }
-    }
   </style>
+
+  <rect class="bg" x="0.5" y="0.5" width="589" height="359" rx="10"/>
 
   <!-- External monitor -->
   <path class="body" d="M395 240 V328 H425 V240 Z"/>

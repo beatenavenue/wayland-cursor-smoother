@@ -214,7 +214,67 @@ which is much faster while you are finding what you like:
 | `rate` | 120 | Positions emitted per second while gliding |
 | `inset` | 2 | Pixels inside the destination display to land. A safety margin, not a preference |
 | `max_slide` | none | Refuse to redirect when the pointer would have to slide further than this along an edge |
-| `undo_window` | off | Seconds after a **warp** during which moving `threshold` the other way puts the pointer back exactly where it was. Read the next section before you turn it on. It does nothing under `style = glide` |
+| `min_facing` | 0 | Do not redirect at an edge whose facing ratio is lower than this, in percent. 0 redirects every dead band. See [the next section](#a-hypothesis-about-when-a-wall-feels-expected) |
+| `undo_window` | off | Seconds after a **warp** during which moving `threshold` the other way puts the pointer back exactly where it was. Read [Going back](#going-back) before you turn it on. It does nothing under `style = glide` |
+
+### A hypothesis about when a wall feels expected
+
+Some people want a feature like Windows 11's *Ease cursor movement between
+displays* so much that they install a separate tool for it. Other people find
+the same feature annoying. This may be more than a matter of taste. It may be
+about how the display layout shapes what people expect. This section explains
+that hypothesis, and the `min_facing` setting that is based on it.
+
+![laptop and display](img/desk-setup.svg)
+
+A common example is a laptop with an external monitor. The two screens differ
+in height, so the part where the pointer can move between them (the green
+frame in the picture) is sometimes narrow, and moving across is a bit of
+work. Even so, people rarely seem to want the pointer to pass the wall (the
+stretch of edge with nothing behind it) in this setup. It is clear where the
+pointer crosses to the next screen, so there is not much to get confused
+about.
+
+What feels like "getting stuck" is a gap between where you think the next
+screen is and where the pointer actually goes. That gap may be the real need
+behind tools like this one. The other way round also holds. If the pointer
+easily passes a wall that you expected to be there, that is a gap too, and it
+feels wrong as well. This may be why people disagree about the feature.
+
+So when do people feel that a wall naturally belongs there? This project uses
+a number called the facing ratio as a clue.
+
+- The **target display** is the display you are moving the pointer to.
+- On the target display, take the edge that faces the display the pointer is
+  on now. The part of that edge that actually touches the current display is
+  the **opening**. The pointer moves between the two displays through it.
+- The **facing ratio** is how much of that edge the opening covers.
+
+When the facing ratio is low, the wall feels expected. As it gets higher, the
+wall feels more and more like an unexpected obstacle. That is the hypothesis.
+
+![facing ratio](img/facing_ratio_20_vs_80.svg)
+
+In both examples, the edge of the target display is 150 long. The dark green
+line is the opening. The grey line is the rest of that edge, where nothing is
+beside it. The purple dot is the pointer on the current display, pushed
+against a stretch of its edge with nothing behind it.
+
+- On the left, only 30 of 150 touches, so the facing ratio is 20%. The target
+  display sits mostly off to the side, and a wall is what you would expect to
+  see.
+- On the right, 120 of 150 touches, so the facing ratio is 80%. The target
+  display is almost straight ahead, but the pointer still stops at a wall.
+
+With three or more monitors, one desk can have both expected and unexpected
+walls. The `min_facing` setting lets you choose between them.
+
+Set `min_facing` to the **lowest** facing ratio, in percent, at which this
+project redirects. At an edge with a facing ratio at or above it, the pointer
+is redirected. Below it, nothing happens, and the pointer stops at the wall as
+it would without this project. For example, at 50%, the left example above
+(20%) is not redirected, and the right one (80%) is. The default is 0, which
+redirects every dead band.
 
 ### Going back
 
