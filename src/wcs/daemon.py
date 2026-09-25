@@ -69,6 +69,11 @@ def log(message: str) -> None:
     print(f"[{time.strftime('%H:%M:%S')}] {message}", flush=True)
 
 
+def percent(value: float) -> str:
+    """A facing ratio for a person to compare against ``min_facing``."""
+    return f"{round(value, 1):g}%"
+
+
 class Daemon:
     def __init__(self, config: Config, *, verbose: bool = False) -> None:
         self.config = config
@@ -204,6 +209,7 @@ class Daemon:
             self.layout,
             inset=self.config.redirect.inset,
             max_slide=self.config.redirect.max_slide,
+            min_facing=self.config.detect.min_facing,
         )
         self.detector.disarm(time.monotonic())
         self._armed = None
@@ -213,7 +219,8 @@ class Daemon:
         for band in self.bands:
             log(f"  band {band.index}: {band.output} push {band.direction.value} "
                 f"{band.rect.width}x{band.rect.height} at "
-                f"({band.rect.x},{band.rect.y})")
+                f"({band.rect.x},{band.rect.y}) -> {band.to_output}, "
+                f"facing {percent(band.facing)}")
         return summary
 
     def _load_script(self) -> None:
@@ -357,6 +364,7 @@ class Daemon:
             self.layout, self._position, band.direction,
             inset=self.config.redirect.inset,
             max_slide=self.config.redirect.max_slide,
+            min_facing=self.config.detect.min_facing,
         )
         if redirect is None:
             if self.verbose:

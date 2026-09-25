@@ -276,6 +276,14 @@ it would without this project. For example, at 50%, the left example above
 (20%) is not redirected, and the right one (80%) is. The default is 0, which
 redirects every dead band.
 
+You do not have to work the ratios out by hand. `--check` prints the facing
+ratio of every dead band, and lists the bands that `min_facing` leaves alone.
+Try a value there before you put it in the config file:
+
+```bash
+./bin/wcsd --check --min-facing 50
+```
+
 ### Going back
 
 A redirect starts at a stretch of edge with nothing behind it. But it lands

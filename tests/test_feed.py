@@ -24,6 +24,13 @@ from wcs.layout import parse_kscreen_doctor  # noqa: E402
 FIXTURE = Path(__file__).parent / "data" / "kscreen-doctor-plasma-6.3.6.txt"
 REAL = parse_kscreen_doctor(FIXTURE.read_text())
 
+# The facing ratio figure: two equal displays, offset so that only 30 of 150
+# rows touch. Both directions face 20%.
+OFFSET = Layout.of([
+    Output("target", Rect(0, 0, 90, 150)),
+    Output("current", Rect(90, 120, 120, 150)),
+])
+
 
 class WatchBandTest(unittest.TestCase):
     def test_the_real_layout_yields_exactly_its_four_dead_bands(self):
@@ -79,6 +86,38 @@ class WatchBandTest(unittest.TestCase):
         self.assertEqual(watch_bands(REAL, max_slide=10), [])
         self.assertEqual(len(watch_bands(REAL, max_slide=1000)), 4)
 
+    def test_each_band_knows_where_it_goes_and_its_facing_ratio(self):
+        # On the author's desk the side displays are fully backed by the
+        # centre one, so every band faces 100%.
+        self.assertEqual(
+            [(b.to_output, b.facing) for b in watch_bands(REAL)],
+            [("DP-3", 100.0), ("DP-3", 100.0), ("DP-1", 100.0), ("DP-1", 100.0)],
+        )
+
+    def test_min_facing_removes_the_bands_it_would_refuse(self):
+        self.assertEqual(len(watch_bands(REAL, min_facing=100)), 4)
+        self.assertEqual(len(watch_bands(OFFSET, min_facing=20)), 2)
+        self.assertEqual(len(watch_bands(OFFSET, min_facing=20.1)), 0)
+
+    def test_a_band_is_split_where_its_target_changes(self):
+        # Two displays stacked on the left, with a gap between them. The part
+        # of the centre's left edge in the gap goes up to "upper" nearer the
+        # top and down to "lower" nearer the bottom. Those two have different
+        # facing ratios, so they must be separate strips.
+        centre = Output("centre", Rect(1000, 0, 1000, 1000))
+        upper = Output("upper", Rect(0, 0, 1000, 400))       # touches 400 of 400
+        lower = Output("lower", Rect(0, 600, 1000, 800))     # touches 400 of 800
+        layout = Layout.of([centre, upper, lower])
+        left = [b for b in watch_bands(layout, inset=0)
+                if b.output == "centre" and b.direction is Direction.LEFT]
+        self.assertEqual(
+            [(b.rect.top, b.rect.bottom, b.to_output, b.facing) for b in left],
+            [(400, 500, "upper", 100.0), (500, 600, "lower", 50.0)],
+        )
+        kept = [b for b in watch_bands(layout, inset=0, min_facing=60)
+                if b.output == "centre" and b.direction is Direction.LEFT]
+        self.assertEqual([(b.rect.top, b.rect.bottom) for b in kept], [(400, 500)])
+
     def test_a_rectangular_layout_has_nothing_to_watch(self):
         tidy = Layout.of([
             Output("a", Rect(0, 0, 1920, 1080)),
@@ -89,7 +128,8 @@ class WatchBandTest(unittest.TestCase):
 
 class JsonTest(unittest.TestCase):
     def test_the_table_carries_only_what_the_script_needs(self):
-        band = WatchBand(3, Rect(10, 20, 2, 30), "DP-9", Direction.LEFT)
+        band = WatchBand(3, Rect(10, 20, 2, 30), "DP-9", Direction.LEFT,
+                         to_output="DP-8", facing=20.0)
         self.assertEqual(
             json.loads(bands_as_json([band])),
             [{"i": 3, "x": 10, "y": 20, "w": 2, "h": 30}],
@@ -98,8 +138,8 @@ class JsonTest(unittest.TestCase):
     def test_the_output_name_and_direction_stay_in_python(self):
         # The script gets rectangles, not meanings.
         text = bands_as_json(watch_bands(REAL))
-        self.assertNotIn("DP-4", text)
-        self.assertNotIn("left", text)
+        for word in ("DP-4", "DP-3", "DP-1", "left", "facing", "100"):
+            self.assertNotIn(word, text)
 
 
 class ScriptTest(unittest.TestCase):

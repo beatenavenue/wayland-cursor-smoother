@@ -25,7 +25,16 @@ import json
 from dataclasses import dataclass
 from typing import Iterable, Optional, Sequence
 
-from .geometry import Direction, Layout, Point, Rect, dead_bands, redirect_target
+from .geometry import (
+    Direction,
+    Layout,
+    Output,
+    Point,
+    Rect,
+    dead_bands,
+    outputs_beyond,
+    redirect_target,
+)
 
 #: How many pixels deep a watch strip is. The pointer pinned at an edge sits
 #: exactly on it, so one column would do; a little more absorbs rounding, and
@@ -35,42 +44,81 @@ DEFAULT_STRIP = 2
 
 @dataclass(frozen=True)
 class WatchBand:
-    """One dead band, as a rectangle the script can test a point against."""
+    """One dead band, as a rectangle the script can test a point against.
+
+    ``to_output`` and ``facing`` say where a push here goes and how much of
+    that display's edge touches this one. They stay in Python: the script is
+    handed the rectangle and nothing else.
+    """
 
     index: int
     rect: Rect
     output: str
     direction: Direction
+    to_output: str
+    facing: float
 
 
 def watch_bands(layout: Layout, *, strip: int = DEFAULT_STRIP,
                 min_length: int = 2,
                 inset: int = 2,
-                max_slide: Optional[float] = None) -> list[WatchBand]:
+                max_slide: Optional[float] = None,
+                min_facing: float = 0.0) -> list[WatchBand]:
     """Every dead band that has somewhere to redirect to, as a strip.
 
     Bands with nothing beyond them -- the outer perimeter of the desktop --
     are left out. Watching them would arm the detector where no redirect can
     ever fire, which at best wastes the stream and at worst teaches the user
-    that pushing sometimes does nothing.
+    that pushing sometimes does nothing. Bands that ``max_slide`` or
+    ``min_facing`` refuse are left out for the same reason.
     """
     bands: list[WatchBand] = []
     for direction in Direction:
         for band in dead_bands(layout, direction, min_length=min_length):
-            rect = next(o.rect for o in layout.outputs if o.name == band.output)
-            probe = _band_probe(rect, band.start, band.end, direction)
-            if redirect_target(layout, probe, direction,
-                               inset=inset, max_slide=max_slide) is None:
-                continue
-            bands.append(
-                WatchBand(
-                    index=len(bands),
-                    rect=_strip_rect(rect, band.start, band.end, direction, strip),
-                    output=band.output,
-                    direction=direction,
+            source = next(o for o in layout.outputs if o.name == band.output)
+            for start, end in _runs_by_target(layout, source, band.start,
+                                              band.end, direction, inset):
+                probe = _band_probe(source.rect, start, end, direction)
+                redirect = redirect_target(layout, probe, direction, inset=inset,
+                                           max_slide=max_slide,
+                                           min_facing=min_facing)
+                if redirect is None:
+                    continue
+                bands.append(
+                    WatchBand(
+                        index=len(bands),
+                        rect=_strip_rect(source.rect, start, end, direction, strip),
+                        output=band.output,
+                        direction=direction,
+                        to_output=redirect.to_output,
+                        facing=redirect.facing,
+                    )
                 )
-            )
     return bands
+
+
+def _runs_by_target(layout: Layout, source: Output, start: int, end: int,
+                    direction: Direction, inset: int) -> list[tuple[int, int]]:
+    """Split a dead band wherever the display it redirects to changes.
+
+    Nearly every band has one display beyond it and comes back whole. With
+    two or more, the nearest one can change partway along the band. Each
+    part then has its own facing ratio, and ``min_facing`` may keep one part
+    and refuse the other, so each part needs its own strip. Probing only the
+    middle of the whole band would get one of the parts wrong.
+    """
+    if len(outputs_beyond(layout, source, direction)) < 2:
+        return [(start, end)]
+    runs: list[list] = []
+    for at in range(start, end):
+        probe = _band_probe(source.rect, at, at + 1, direction)
+        redirect = redirect_target(layout, probe, direction, inset=inset)
+        to = redirect.to_output if redirect else None
+        if runs and runs[-1][2] == to:
+            runs[-1][1] = at + 1
+        else:
+            runs.append([at, at + 1, to])
+    return [(run_start, run_end) for run_start, run_end, _ in runs]
 
 
 def _band_probe(rect: Rect, start: int, end: int, direction: Direction) -> Point:

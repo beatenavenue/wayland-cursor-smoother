@@ -175,6 +175,9 @@ class Redirect:
     as the pointer sliding; it is the quantity the policy minimises."""
     gap: float
     """Distance moved across the edge, i.e. the width of the jump."""
+    facing: float
+    """How much of the target's edge touches the source display, in percent.
+    See `facing_ratio`."""
 
 
 def _probe_point(rect: Rect, p: Point, direction: Direction) -> Point:
@@ -199,6 +202,15 @@ def _is_beyond(candidate: Rect, source: Rect, direction: Direction) -> bool:
     return candidate.top >= source.bottom
 
 
+def outputs_beyond(layout: Layout, source: Output, direction: Direction) -> list[Output]:
+    """Every display lying wholly past ``source``'s edge in ``direction``.
+
+    These are the only displays a push at that edge can redirect to.
+    """
+    return [c for c in layout.outputs
+            if c is not source and _is_beyond(c.rect, source.rect, direction)]
+
+
 def _at_edge(rect: Rect, p: Point, direction: Direction, tol: float) -> bool:
     if direction is Direction.LEFT:
         return p.x <= rect.left + tol
@@ -215,6 +227,42 @@ def _along(p: Point, direction: Direction) -> float:
 
 def _across(p: Point, direction: Direction) -> float:
     return p.x if direction.horizontal else p.y
+
+
+def facing_ratio(source: Rect, target: Rect, direction: Direction) -> float:
+    """How much of ``target``'s edge touches ``source``, in percent.
+
+    The edge is the one of ``target`` that faces ``source`` when the pointer
+    is pushed in ``direction``. The part of it that touches ``source`` is the
+    opening the pointer normally crosses by.
+
+    This is the measure behind ``min_facing``. The idea is that a wall feels
+    expected when the display beyond it mostly sits off to the side, and
+    unexpected when it is almost straight ahead. It is measured on the
+    target's edge, not the source's, so going back the other way can give a
+    different value.
+
+    A target that does not touch ``source`` at all has no opening, so it is
+    0. "Touching" is the same test `dead_bands` uses for a display backing an
+    edge: the target covers the first column or row past it.
+    """
+    if direction is Direction.LEFT:
+        touching = target.right == source.left
+    elif direction is Direction.RIGHT:
+        touching = target.left == source.right
+    elif direction is Direction.UP:
+        touching = target.bottom == source.top
+    else:
+        touching = target.top == source.bottom
+    if not touching:
+        return 0.0
+    if direction.horizontal:
+        start, end = max(source.top, target.top), min(source.bottom, target.bottom)
+        length = target.height
+    else:
+        start, end = max(source.left, target.left), min(source.right, target.right)
+        length = target.width
+    return 100.0 * max(0, end - start) / length
 
 
 def _interval_subtract(
@@ -288,6 +336,7 @@ def redirect_target(
     *,
     inset: int = 2,
     max_slide: Optional[float] = None,
+    min_facing: float = 0.0,
     edge_tol: float = 1.0,
 ) -> Optional[Redirect]:
     """Where to put the pointer, or ``None`` to leave it alone.
@@ -295,12 +344,17 @@ def redirect_target(
     ``None`` is returned -- meaning "this is not our business, let KWin do
     what it normally does" -- when the pointer is not against the edge it is
     being pushed at, when a display already backs that stretch of edge, when
-    nothing lies beyond it at all, or when the only candidate is further
-    along the edge than ``max_slide`` allows.
+    nothing lies beyond it at all, when the only candidate is further along
+    the edge than ``max_slide`` allows, or when the chosen display's
+    `facing_ratio` is below ``min_facing``.
 
     Among the displays that do lie beyond the edge, the one needing the
     smallest slide wins, ties broken by the smaller jump.  That ordering *is*
     the Windows semantic: position along the edge is what must be preserved.
+
+    ``min_facing`` is checked after that choice, not used to make it. A wall
+    below it is one the user expects to stop at, so the pointer stops there.
+    It is not sent to some other display further away instead.
     """
     source = layout.output_at(p)
     if source is None:
@@ -312,14 +366,15 @@ def redirect_target(
         return None
 
     best: Optional[Redirect] = None
-    for c in layout.outputs:
-        if c is source or not _is_beyond(c.rect, source.rect, direction):
-            continue
+    for c in outputs_beyond(layout, source, direction):
         target = c.rect.inset(inset).clamp(p)
         slide = abs(_along(target, direction) - _along(p, direction))
         gap = abs(_across(target, direction) - _across(p, direction))
         if max_slide is not None and slide > max_slide:
             continue
         if best is None or (slide, gap) < (best.slide, best.gap):
-            best = Redirect(target=target, to_output=c.name, slide=slide, gap=gap)
+            best = Redirect(target=target, to_output=c.name, slide=slide, gap=gap,
+                            facing=facing_ratio(source.rect, c.rect, direction))
+    if best is not None and best.facing < min_facing:
+        return None
     return best

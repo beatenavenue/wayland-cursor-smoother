@@ -70,6 +70,8 @@ here as unverified has now run on the author's hardware — see "Closed,
   author still notices something slightly off about it. What that something is
   has not been pinned down; two candidates were named in advance and neither
   has been ruled in. See "Closed, 2026-09-21".
+- **`min_facing` is implemented and has not run on hardware.** It is on
+  `feat/edgerule`. See "min_facing, 2026-09-25".
 - **Mixed-DPI is out of scope, not open.** See settled decision 11 — do not
   raise it as unfinished business.
 - **A stale `Cursor Feed 1.0` KWin script package** is installed on the
@@ -2011,3 +2013,57 @@ arrow back to the start, and now draws the way back crossing at the corner.
 A config file written by `--write-config` before this change says
 `undo_window = 3` in so many words, and the new default does nothing to it.
 That line has to be changed to `off` or removed.
+
+## min_facing, 2026-09-25: implemented, not yet run on hardware
+
+The author's hypothesis, written up in both READMEs under "A hypothesis about
+when a wall feels expected": a wall feels expected when the display beyond it
+mostly sits off to the side, and unexpected when it is almost straight ahead.
+The measure is the **facing ratio**: of the target display's edge that faces
+the current display, the share that actually touches it. `min_facing`
+(`[detect]`, percent, default 0) redirects only where the ratio is at least
+that.
+
+Default 0 changes nothing: every band on the author's desk faces 100%, and a
+ratio is never below 0. The four watch strips are byte for byte what they were.
+
+### Decisions taken while implementing, and why
+
+- **Checked after choosing the target, not used to choose it.** The READMEs
+  say that below the threshold "nothing happens, and the pointer stops at the
+  wall". Filtering candidates first would instead send the pointer to some
+  other, further display. `test_a_refused_display_is_not_swapped_for_a_further_one`
+  pins it. Asked of the author; see "Open" below.
+- **Measured on the target's edge**, as the READMEs define it. So it depends
+  on direction. The laptop in `img/desk-setup.svg` faces the monitor 26%, and
+  the monitor faces the laptop 37%.
+- **A display that does not touch the current one is 0%**, because it has no
+  opening. "Touching" is the same test `dead_bands` uses for a backed edge.
+  So with any `min_facing` above 0, a redirect across a gap or past another
+  display is refused.
+- **A band is split where its target changes.** Before, one probe in the
+  middle of a band decided whether the whole band was watched. That was right
+  while every point in a band went to the same display. With two or more
+  displays beyond one edge the nearest can change partway, and the two parts
+  can have different ratios. `_runs_by_target` in `src/wcs/feed.py` splits
+  those bands; a band with one display beyond is untouched, so this costs
+  nothing on a normal desk.
+- **`[detect]`, not `[redirect]`**, because that is where the author's
+  README placed it. `max_slide`, which refuses redirects the same way, is in
+  `[redirect]`.
+
+### A bug found on the way
+
+`configparser`'s default interpolation gives `%` a meaning, so
+`min_facing = 50%` (the obvious thing to write for a percentage) raised a
+traceback instead of a `ConfigError`. Every setting had this; none had a
+reason to type `%` until now. `parse_config` turns interpolation off, and
+`50%` is refused as not a number.
+
+### Open
+
+- Whether a refused target should instead fall through to another display.
+- Whether the asymmetry by direction is wanted.
+- Whether `50%` should be accepted as 50.
+- Whether the facing ratio matches what is felt at all. It is a hypothesis,
+  and nothing here tests that part.

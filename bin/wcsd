@@ -34,7 +34,7 @@ from wcs.config import (
     load_config,
     with_overrides,
 )
-from wcs.daemon import DEVICE_NAME, FEED_MARKER, PLUGIN_NAME, Daemon, log
+from wcs.daemon import DEVICE_NAME, FEED_MARKER, PLUGIN_NAME, Daemon, log, percent
 from wcs.evdev import list_devices
 from wcs.feed import watch_bands
 from wcs.kwinscript import find_dbus_caller
@@ -83,6 +83,10 @@ def build_parser() -> argparse.ArgumentParser:
                         help="seconds a warp can be taken back by moving the "
                              "same amount the other way; off by default, and 0 "
                              "switches it off (style=warp only)")
+    detect.add_argument("--min-facing", type=float, dest="min_facing",
+                        metavar="PERCENT",
+                        help="only redirect where the facing ratio is at "
+                             "least this (0 to 100); 0 redirects everywhere")
 
     redirect = parser.add_argument_group("redirect (overrides the config file)")
     redirect.add_argument("--style", choices=STYLES,
@@ -102,7 +106,8 @@ def report(config, verbose: bool) -> int:
     print(f"config file : {config_path()}"
           f"{'' if config_path().exists() else '  (absent; using defaults)'}")
     print(f"detect      : threshold={config.detect.threshold:g} "
-          f"window={config.detect.window:g} cooldown={config.detect.cooldown:g}")
+          f"window={config.detect.window:g} cooldown={config.detect.cooldown:g} "
+          f"min_facing={config.detect.min_facing:g}")
     if not config.detect.undo_window:
         undo = "off"
     elif config.redirect.style != WARP:
@@ -128,15 +133,32 @@ def report(config, verbose: bool) -> int:
         print(f"  {output.name:<10} {r.width}x{r.height} at ({r.x},{r.y})")
 
     bands = watch_bands(layout, inset=config.redirect.inset,
-                        max_slide=config.redirect.max_slide)
+                        max_slide=config.redirect.max_slide,
+                        min_facing=config.detect.min_facing)
     print(f"\nwatching    : {len(bands)} band(s)")
     for band in bands:
         r = band.rect
         print(f"  {band.index}  {band.output:<10} push {band.direction.value:<5} "
-              f"{r.width}x{r.height} at ({r.x},{r.y})")
+              f"{r.width}x{r.height} at ({r.x},{r.y})  -> {band.to_output}, "
+              f"facing {percent(band.facing)}")
     if not bands:
         print("  Nothing to watch. Either the layout is already a clean")
-        print("  rectangle, or max_slide is refusing every band.")
+        print("  rectangle, or max_slide or min_facing is refusing every band.")
+
+    # Shown so that choosing min_facing does not mean working out each
+    # edge's facing ratio by hand.
+    watched = {band.rect for band in bands}
+    refused = [band for band in watch_bands(layout, inset=config.redirect.inset,
+                                            max_slide=config.redirect.max_slide)
+               if band.rect not in watched]
+    if refused:
+        print(f"\nleft alone  : {len(refused)} band(s) below "
+              f"min_facing={config.detect.min_facing:g}")
+        for band in refused:
+            r = band.rect
+            print(f"     {band.output:<10} push {band.direction.value:<5} "
+                  f"{r.width}x{r.height} at ({r.x},{r.y})  -> {band.to_output}, "
+                  f"facing {percent(band.facing)}")
 
     devices = [d for d in list_devices(exclude_names=[DEVICE_NAME])
                if d.is_pointing and d.readable]
@@ -181,7 +203,8 @@ def diagnose(config, seconds: float) -> int:
     started = datetime.now()
     layout = detect_layout()
     bands = watch_bands(layout, inset=config.redirect.inset,
-                        max_slide=config.redirect.max_slide)
+                        max_slide=config.redirect.max_slide,
+                        min_facing=config.detect.min_facing)
     print(f"1. layout and bands : {len(bands)} band(s) to watch")
     for band in bands:
         r = band.rect
@@ -336,7 +359,7 @@ def main() -> int:
         config = with_overrides(
             load_config(args.config),
             threshold=args.threshold, window=args.window, cooldown=args.cooldown,
-            undo_window=args.undo_window,
+            undo_window=args.undo_window, min_facing=args.min_facing,
             style=args.style, duration=args.duration, rate=args.rate,
             inset=args.inset, max_slide=args.max_slide,
         )

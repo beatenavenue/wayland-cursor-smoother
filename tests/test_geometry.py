@@ -22,6 +22,7 @@ from wcs.geometry import (  # noqa: E402
     Rect,
     _interval_subtract,
     dead_bands,
+    facing_ratio,
     redirect_target,
 )
 
@@ -211,3 +212,89 @@ class RedirectTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FacingRatioTest(unittest.TestCase):
+    """The facing ratio figure, img/facing_ratio_20_vs_80.svg, in numbers."""
+
+    TARGET = Rect(0, 0, 90, 150)
+
+    def test_the_figures_left_example_is_20_percent(self):
+        current = Rect(90, 120, 120, 150)   # touches rows 120..149 of 150
+        self.assertEqual(facing_ratio(current, self.TARGET, Direction.LEFT), 20.0)
+
+    def test_the_figures_right_example_is_80_percent(self):
+        current = Rect(90, 30, 120, 150)    # touches rows 30..149 of 150
+        self.assertEqual(facing_ratio(current, self.TARGET, Direction.LEFT), 80.0)
+
+    def test_it_is_measured_on_the_targets_edge_so_it_depends_on_direction(self):
+        # The laptop and monitor from img/desk-setup.svg: 48 rows touch, out
+        # of the monitor's 186 and the laptop's 130.
+        laptop = Rect(50, 180, 190, 130)
+        monitor = Rect(240, 42, 296, 186)
+        self.assertAlmostEqual(facing_ratio(laptop, monitor, Direction.RIGHT),
+                               100 * 48 / 186)
+        self.assertAlmostEqual(facing_ratio(monitor, laptop, Direction.LEFT),
+                               100 * 48 / 130)
+
+    def test_a_display_that_does_not_touch_is_0(self):
+        gap = Rect(80, 0, 100, 150)         # ten columns short of the target
+        self.assertEqual(facing_ratio(Rect(100, 0, 100, 150), gap, Direction.LEFT), 0.0)
+        self.assertEqual(facing_ratio(Rect(200, 0, 100, 150), self.TARGET,
+                                      Direction.LEFT), 0.0)
+
+    def test_a_neighbour_that_overhangs_the_source_loses_the_overhang(self):
+        # The left monitor lies wholly within the centre's height. The right
+        # one starts 200 rows above it, so 1720 of its 1920 rows touch.
+        self.assertEqual(facing_ratio(CENTRE.rect, LEFT_MON.rect, Direction.LEFT), 100.0)
+        self.assertAlmostEqual(facing_ratio(CENTRE.rect, RIGHT_MON.rect, Direction.RIGHT),
+                               100 * 1720 / 1920)
+
+    def test_vertical_edges_use_widths(self):
+        top = Rect(0, 0, 500, 500)
+        bottom = Rect(200, 500, 1000, 500)  # 300 of its 1000 columns touch
+        self.assertEqual(facing_ratio(top, bottom, Direction.DOWN), 30.0)
+        self.assertEqual(facing_ratio(bottom, top, Direction.UP), 60.0)
+
+
+class MinFacingTest(unittest.TestCase):
+    CURRENT = Output("current", Rect(90, 120, 120, 150))
+    TARGET = Output("target", Rect(0, 0, 90, 150))
+    LAYOUT = Layout.of([TARGET, CURRENT])
+    PUSH = Point(90, 200)                   # below the target, pushing left
+
+    def test_the_redirect_reports_its_facing_ratio(self):
+        r = redirect_target(self.LAYOUT, self.PUSH, Direction.LEFT)
+        self.assertEqual(r.to_output, "target")
+        self.assertEqual(r.facing, 20.0)
+
+    def test_below_min_facing_the_pointer_is_left_at_the_wall(self):
+        self.assertIsNone(
+            redirect_target(self.LAYOUT, self.PUSH, Direction.LEFT, min_facing=50))
+
+    def test_the_threshold_itself_still_redirects(self):
+        self.assertIsNotNone(
+            redirect_target(self.LAYOUT, self.PUSH, Direction.LEFT, min_facing=20))
+
+    def test_the_default_redirects_even_to_a_display_that_does_not_touch(self):
+        # 0 means always redirect, including where the facing ratio is 0.
+        src = Output("src", Rect(1000, 0, 1000, 1000))
+        far = Output("far", Rect(0, 400, 100, 200))
+        layout = Layout.of([src, far])
+        r = redirect_target(layout, Point(1000, 100), Direction.LEFT)
+        self.assertEqual((r.to_output, r.facing), ("far", 0.0))
+        self.assertIsNone(redirect_target(layout, Point(1000, 100), Direction.LEFT,
+                                          min_facing=1))
+
+    def test_a_refused_display_is_not_swapped_for_a_further_one(self):
+        # "near" is where the pointer would go, and it faces only 10%. "wide"
+        # faces 100% but needs a much longer slide. Refusing "near" leaves the
+        # pointer at the wall; it does not send it to "wide" instead.
+        src = Output("src", Rect(1000, 0, 1000, 1000))
+        near = Output("near", Rect(500, -900, 500, 1000))   # 100 of 1000 rows touch
+        wide = Output("wide", Rect(500, 600, 500, 400))     # 400 of 400 rows touch
+        layout = Layout.of([src, near, wide])
+        r = redirect_target(layout, Point(1000, 150), Direction.LEFT, inset=0)
+        self.assertEqual((r.to_output, r.facing), ("near", 10.0))
+        self.assertIsNone(redirect_target(layout, Point(1000, 150), Direction.LEFT,
+                                          inset=0, min_facing=50))
