@@ -64,12 +64,12 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(parse_config("[redirect]\nmax_slide = 400\n").redirect.max_slide, 400.0)
 
     def test_min_facing_defaults_to_redirecting_everywhere(self):
-        self.assertEqual(Config().detect.min_facing, 0.0)
+        self.assertEqual(Config().redirect.min_facing, 0.0)
 
     def test_min_facing_takes_a_percentage_including_both_ends(self):
         for text, value in (("0", 0.0), ("50", 50.0), ("33.3", 33.3), ("100", 100.0)):
-            config = parse_config(f"[detect]\nmin_facing = {text}\n")
-            self.assertEqual(config.detect.min_facing, value, text)
+            config = parse_config(f"[redirect]\nmin_facing = {text}\n")
+            self.assertEqual(config.redirect.min_facing, value, text)
 
 
 class RefusalTest(unittest.TestCase):
@@ -108,11 +108,11 @@ class RefusalTest(unittest.TestCase):
         self.assert_refused("[redirect]\nrate = 0\n", "greater than 0")
 
     def test_min_facing_outside_0_to_100_is_refused(self):
-        self.assert_refused("[detect]\nmin_facing = -1\n", "from 0 to 100")
-        self.assert_refused("[detect]\nmin_facing = 101\n", "from 0 to 100")
+        self.assert_refused("[redirect]\nmin_facing = -1\n", "from 0 to 100")
+        self.assert_refused("[redirect]\nmin_facing = 101\n", "from 0 to 100")
 
     def test_min_facing_is_a_plain_number_not_a_percent_sign(self):
-        self.assert_refused("[detect]\nmin_facing = 50%\n", "not a number")
+        self.assert_refused("[redirect]\nmin_facing = 50%\n", "not a number")
 
     def test_a_zero_max_slide_is_refused_rather_than_read_as_off(self):
         # "off" has spellings; 0 would mean "never redirect", which nobody

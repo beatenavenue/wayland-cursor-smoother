@@ -2050,7 +2050,8 @@ ratio is never below 0. The four watch strips are byte for byte what they were.
   nothing on a normal desk.
 - **`[detect]`, not `[redirect]`**, because that is where the author's
   README placed it. `max_slide`, which refuses redirects the same way, is in
-  `[redirect]`.
+  `[redirect]`. **Reversed on 2026-09-26: it is in `[redirect]` now.** See
+  "Answered, 2026-09-26" below.
 
 ### A bug found on the way
 
@@ -2064,6 +2065,41 @@ reason to type `%` until now. `parse_config` turns interpolation off, and
 
 - Whether a refused target should instead fall through to another display.
 - Whether the asymmetry by direction is wanted.
-- Whether `50%` should be accepted as 50.
+- ~~Whether `50%` should be accepted as 50.~~ Answered below: no.
 - Whether the facing ratio matches what is felt at all. It is a hypothesis,
   and nothing here tests that part.
+
+### Answered, 2026-09-26
+
+- **`min_facing` moved to `[redirect]`.** The author's ruling, from reading
+  the code: it is passed to `redirect_target` and `watch_bands` beside
+  `max_slide` and `inset`, so it belongs with them. The `--min-facing` flag
+  moved to the redirect group, and the Japanese comment translation moved
+  with it. Nothing had shipped, so no config file can hold it under
+  `[detect]`.
+- **`50%` stays refused.** Only a plain number is accepted.
+- **The first two open items are being reworked by the author.** The concept
+  and the calculation are being reconsidered, and instructions will follow.
+  Do not settle them from here.
+
+### The author expects no redirect to a non-adjacent display. The code does it.
+
+Raised on 2026-09-26. The author's understanding: *this tool should not help
+the pointer move to a display that is not adjacent.* That is not what the code
+does, and it has not been since the first geometry commit (252deda,
+2026-09-20). `redirect_target` takes every display lying wholly past the edge,
+at any distance, and the smallest slide wins. Run against the base before any
+`min_facing` work, with three displays in a row where the middle one is short:
+
+```
+A  x    0..1000  y 0..1000   tall
+B  x 1000..2000  y 0..400    short, top-aligned
+C  x 2000..3000  y 0..1000   tall
+
+C left edge y=450: -> A at (997,450)  slide 0  jump 1003px
+```
+
+The pointer jumps over B to A, because A needs no slide and B needs one.
+`test_the_smallest_slide_wins_over_the_smallest_gap` has pinned the same
+thing since that commit, with a 900px gap. **Not changed.** Whether it should
+be is the author's decision, and it touches the facing-ratio rework above.

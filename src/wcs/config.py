@@ -54,9 +54,6 @@ class DetectConfig:
     #: Seconds a warp stays undoable; ``None`` switches undo off, and is the
     #: default. See `UndoLatch` for why it is off, and why only a warp has it.
     undo_window: Optional[float] = None
-    #: Percent. Redirect only where the display beyond faces at least this
-    #: much; 0 redirects everywhere. See `geometry.facing_ratio`.
-    min_facing: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -68,6 +65,9 @@ class RedirectConfig:
     rate: float = 120.0
     inset: int = 2
     max_slide: Optional[float] = None
+    #: Percent. Redirect only where the display beyond faces at least this
+    #: much; 0 redirects everywhere. See `geometry.facing_ratio`.
+    min_facing: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -83,7 +83,6 @@ _FIELDS = {
         "cooldown": ("float", lambda v: v >= 0, "must not be negative"),
         "undo_window": ("optional_seconds", lambda v: v > 0,
                         "must be greater than 0, or off"),
-        "min_facing": ("float", lambda v: 0 <= v <= 100, "must be from 0 to 100"),
     },
     "redirect": {
         "style": ("style", None, None),
@@ -91,6 +90,7 @@ _FIELDS = {
         "rate": ("float", lambda v: v > 0, "must be greater than 0"),
         "inset": ("int", lambda v: v >= 0, "must not be negative"),
         "max_slide": ("optional_float", lambda v: v > 0, "must be greater than 0"),
+        "min_facing": ("float", lambda v: 0 <= v <= 100, "must be from 0 to 100"),
     },
 }
 
@@ -269,12 +269,6 @@ cooldown = {d.cooldown:g}
 # `off` (or 0) disables it. **It applies to style = warp only.**
 undo_window = {"off" if d.undo_window is None else format(d.undo_window, "g")}
 
-# Only redirect when the facing ratio is at least this value (0 to 100).
-# The facing ratio is how much of the neighbour's edge touches the display
-# the pointer is on, in percent. 0 means always redirect. Raise it if the
-# pointer jumps to another display when you expected it to stop.
-min_facing = {d.min_facing:g}
-
 [redirect]
 # glide -- the pointer travels to its new position over `duration` seconds.
 # warp  -- it arrives instantly, which is what Windows does.
@@ -301,4 +295,10 @@ inset = {r.inset}
 # many pixels along the edge to reach the neighbour. Blank means no limit.
 # Set it if a long slide feels less like a slide and more like a teleport.
 max_slide =
+
+# Only redirect when the facing ratio is at least this value (0 to 100).
+# The facing ratio is how much of the neighbour's edge touches the display
+# the pointer is on, in percent. 0 means always redirect. Raise it if the
+# pointer jumps to another display when you expected it to stop.
+min_facing = {r.min_facing:g}
 """

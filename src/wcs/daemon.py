@@ -209,7 +209,7 @@ class Daemon:
             self.layout,
             inset=self.config.redirect.inset,
             max_slide=self.config.redirect.max_slide,
-            min_facing=self.config.detect.min_facing,
+            min_facing=self.config.redirect.min_facing,
         )
         self.detector.disarm(time.monotonic())
         self._armed = None
@@ -364,7 +364,7 @@ class Daemon:
             self.layout, self._position, band.direction,
             inset=self.config.redirect.inset,
             max_slide=self.config.redirect.max_slide,
-            min_facing=self.config.detect.min_facing,
+            min_facing=self.config.redirect.min_facing,
         )
         if redirect is None:
             if self.verbose:
